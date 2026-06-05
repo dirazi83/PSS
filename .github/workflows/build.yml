@@ -1,13 +1,18 @@
-name: Build standalone apps
+name: Build & Release
 
-# Builds PlayStation Studio for macOS, Windows and Linux.
-# PyInstaller can't cross-compile, so each OS builds on its own runner.
-# Trigger manually (Actions → Build standalone apps → Run) or on a version tag.
+# Builds standalone PlayStation Studio apps for macOS and Windows.
+# - Push a version tag (e.g. v1.0.0) → builds + publishes a GitHub Release
+#   with the downloadable zips attached.
+# - Run manually (Actions → Build & Release → Run) → builds + uploads the
+#   zips as workflow artifacts (no release).
 
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+
+permissions:
+  contents: write          # needed to create the Release
 
 jobs:
   build:
@@ -15,12 +20,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            artifact: PlayStation-Studio-Windows
           - os: macos-latest
-            artifact: PlayStation-Studio-macOS
-          - os: ubuntu-latest
-            artifact: PlayStation-Studio-Linux
+            name: macOS
+          - os: windows-latest
+            name: Windows
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -30,27 +33,41 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Linux needs a few system libs for headless Qt rendering of the icons.
-      - name: Install Qt system deps (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3
-
       - name: Install dependencies
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install ./MkPFS pyinstaller pillow
 
       - name: Generate icons
-        run: python -m playstation_studio.assets.build_icons
+        shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
+        run: python -m playstation_studio.assets.build_icons
 
       - name: Build
+        shell: bash
         run: pyinstaller --noconfirm playstation_studio.spec
 
-      - name: Upload artifact
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent "dist/PlayStation Studio.app" "PlayStation-Studio-macOS.zip"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/PlayStation Studio" -DestinationPath "PlayStation-Studio-Windows.zip"
+
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/
+          name: PlayStation-Studio-${{ matrix.name }}
+          path: PlayStation-Studio-${{ matrix.name }}.zip
+
+      - name: Attach to Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: PlayStation-Studio-${{ matrix.name }}.zip
+          generate_release_notes: true
