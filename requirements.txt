@@ -1,0 +1,12 @@
+# PlayStation Studio GUI dependencies.
+# The MkPFS engine (PS5 compressor) is installed separately from ./MkPFS
+# (see run.sh / README).
+PySide6-Essentials>=6.6
+openpyxl>=3.1          # PS4 library → Excel export
+
+# Optional — the app runs without these, with graceful fallbacks:
+keyring>=24            # FTP Site Manager: store passwords in the OS keyring
+                       #   (without it, passwords fall back into config.json)
+
+# Dev / test only (not needed to run the app):
+#   pyftpdlib          # spin up a local FTP server to test the FTP client

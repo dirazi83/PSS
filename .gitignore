@@ -1,0 +1,26 @@
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# PyInstaller / packaging output
+build/
+dist/
+*.iconset/
+
+# Virtual environment
+.venv/
+
+# Runtime / generated
+config.ini
+*.log
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local agent/editor config
+.claude/
