@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
 
 from .pkg_parser import PkgInfo, get_pkg_info, iter_pkg_files
 from .remote_install import (
-    ExploitHost, FolderHttpServer, RemoteInstaller, TestConnectivity,
+    INSTALL_METHODS, METHOD_PS4_RPI, ExploitHost, FolderHttpServer,
+    RemoteInstaller, TestConnectivity, method_api_port,
 )
 from .rename import BulkRenamer
 from ..shared.config import config
@@ -255,8 +256,19 @@ class Ps4LibraryTab(QWidget):
         lay.addWidget(self._section("REMOTE INSTALL"))
         form = QVBoxLayout()
         form.setSpacing(6)
+        form.addWidget(self._field_label("Install method"))
+        self.method = QComboBox()
+        for key, label in INSTALL_METHODS:
+            self.method.addItem(label, key)
+        saved_method = config.get(CFG, "install_method", METHOD_PS4_RPI)
+        idx = self.method.findData(saved_method)
+        if idx >= 0:
+            self.method.setCurrentIndex(idx)
+        self.method.currentIndexChanged.connect(
+            lambda *_: config.set(CFG, "install_method", self.method.currentData()))
+        form.addWidget(self.method)
         self.ps4_ip = QLineEdit(config.get(CFG, "ps4_ip", ""))
-        self.ps4_ip.setPlaceholderText("PS4 IP address  (e.g. 192.168.1.20)")
+        self.ps4_ip.setPlaceholderText("Console IP  (PS4 or PS5, e.g. 192.168.1.20)")
         self.ps4_ip.editingFinished.connect(
             lambda: config.set(CFG, "ps4_ip", self.ps4_ip.text().strip()))
         ip_row = QHBoxLayout()
@@ -286,7 +298,9 @@ class Ps4LibraryTab(QWidget):
         form.addLayout(port_row)
 
         btn_row = QHBoxLayout()
-        self.btn_test = QPushButton("Test PS4")
+        self.btn_test = QPushButton("Test")
+        self.btn_test.setToolTip("Check the console is reachable on the selected "
+                                 "method's port.")
         self.btn_test.clicked.connect(self.on_test)
         self.btn_exploit = QPushButton("Start Exploit Host")
         self.btn_exploit.setObjectName("Ghost")
@@ -304,6 +318,11 @@ class Ps4LibraryTab(QWidget):
     def _section(self, text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setObjectName("SectionTitle")
+        return lbl
+
+    def _field_label(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"color:{Palette.text_dim}; font-size:12px; font-weight:600;")
         return lbl
 
     # =============================================================== actions
@@ -542,12 +561,14 @@ class Ps4LibraryTab(QWidget):
 
     def on_test(self) -> None:
         if not self.ps4_ip.text().strip():
-            QMessageBox.information(self, "PS4 IP", "Enter your PS4's IP address.")
+            QMessageBox.information(self, "Console IP",
+                                    "Enter your console's IP address.")
             return
         self.conn_lbl.setText("Testing…")
         self._tester = TestConnectivity(
             self.server_ip.currentText(), self.port.value(),
-            self.ps4_ip.text().strip(), parent=self)
+            self.ps4_ip.text().strip(),
+            method_api_port(self.method.currentData()), parent=self)
         self._tester.result.connect(self._on_test_result)
         self._tester.start()
 
@@ -579,7 +600,8 @@ class Ps4LibraryTab(QWidget):
                                     "Tick packages in the Games/Updates/DLC tabs.")
             return
         if not self.ps4_ip.text().strip():
-            QMessageBox.information(self, "PS4 IP", "Enter your PS4's IP address.")
+            QMessageBox.information(self, "Console IP",
+                                    "Enter your console's IP address.")
             return
         paths = [self.install_model.item(r, 6).text() for r in range(rows)]
         # start serving the scanned folder
@@ -593,7 +615,8 @@ class Ps4LibraryTab(QWidget):
         self.btn_install.setEnabled(False)
         self._installer = RemoteInstaller(
             self.server_ip.currentText(), paths, self.ps4_ip.text().strip(),
-            self.port.value(), self.scanned_root, self)
+            self.port.value(), self.scanned_root,
+            method=self.method.currentData(), parent=self)
         self._installer.log.connect(self._log)
         self._installer.progress.connect(self._on_install_progress)
         self._installer.finished_all.connect(

@@ -17,6 +17,7 @@ import os
 import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -24,7 +25,24 @@ from PySide6.QtCore import QThread, Signal
 
 from .pkg_parser import convert_bytes
 
-PS4_API_PORT = 12800
+PS4_API_PORT = 12800       # PS4 Remote PKG Installer
+DPI_V2_PORT = 12800        # etaHEN DPI v2 web server (POST /upload)
+DPI_V1_PORT = 9090         # etaHEN DPI v1 JSON-over-TCP
+
+# Install methods, surfaced in the UI.
+METHOD_PS4_RPI = "ps4_rpi"
+METHOD_PS5_DPI_V2 = "ps5_dpi_v2"
+METHOD_PS5_DPI_V1 = "ps5_dpi_v1"
+
+INSTALL_METHODS = [
+    (METHOD_PS4_RPI, "PS4 · Remote PKG Installer (:12800)"),
+    (METHOD_PS5_DPI_V2, "PS5 · etaHEN DPI v2 (:12800)"),
+    (METHOD_PS5_DPI_V1, "PS5 · etaHEN DPI v1 (:9090)"),
+]
+
+
+def method_api_port(method: str) -> int:
+    return DPI_V1_PORT if method == METHOD_PS5_DPI_V1 else 12800
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
@@ -109,19 +127,44 @@ class RemoteInstaller(QThread):
     finished_all = Signal()
 
     def __init__(self, server_ip: str, paths: list[str], ps4_ip: str,
-                 server_port: int, served_root: str, parent=None) -> None:
+                 server_port: int, served_root: str,
+                 method: str = METHOD_PS4_RPI, parent=None) -> None:
         super().__init__(parent)
         self.server_ip = server_ip
         self.paths = paths
-        self.ps4_ip = ps4_ip
+        self.ps4_ip = ps4_ip            # the console IP (PS4 or PS5)
         self.server_port = int(server_port)
         self.served_root = served_root
+        self.method = method
 
     def _url_for(self, pkg_path: str) -> str:
-        rel = os.path.relpath(pkg_path, self.served_root)
-        rel_posix = rel.replace(os.sep, "/")
-        return f"http://{self.server_ip}:{self.server_port}/{rel_posix}"
+        """URL the console will download from — path segments are
+        percent-encoded so filenames with spaces / () / ™ work."""
+        rel = os.path.relpath(pkg_path, self.served_root).replace(os.sep, "/")
+        enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
+        return f"http://{self.server_ip}:{self.server_port}/{enc}"
 
+    # ------------------------------------------------------------------ run
+    def run(self) -> None:
+        label = dict(INSTALL_METHODS).get(self.method, self.method)
+        self.log.emit(f"Starting remote install via {label}…")
+        for index, pkg_path in enumerate(self.paths):
+            name = os.path.basename(pkg_path)
+            url = self._url_for(pkg_path)
+            try:
+                if self.method == METHOD_PS5_DPI_V2:
+                    self._install_dpi_v2(index, url, name)
+                elif self.method == METHOD_PS5_DPI_V1:
+                    self._install_dpi_v1(index, url, name)
+                else:
+                    self._install_ps4_rpi(index, url, name)
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                self.log.emit(f"✗ {name}: {e}")
+                self.progress.emit(index, "Failed", 0)
+        self.log.emit("All packages processed.")
+        self.finished_all.emit()
+
+    # ---- PS4 Remote PKG Installer (JSON API on :12800, with progress) ----
     def _post(self, endpoint: str, payload: dict) -> dict:
         url = f"http://{self.ps4_ip}:{PS4_API_PORT}/api/{endpoint}"
         data = json.dumps(payload).encode("utf-8")
@@ -130,37 +173,72 @@ class RemoteInstaller(QThread):
         resp = urllib.request.urlopen(req, timeout=15)
         return ast.literal_eval(resp.read().decode("utf-8").replace("\n", ""))
 
-    def run(self) -> None:
-        self.log.emit("Starting remote install…")
-        for index, pkg_path in enumerate(self.paths):
-            name = os.path.basename(pkg_path)
-            url = self._url_for(pkg_path)
+    def _install_ps4_rpi(self, index: int, url: str, name: str) -> None:
+        try:
+            resp = self._post("install", {"type": "direct", "packages": [url]})
+            task_id = int(resp["task_id"])
+        except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+            self.log.emit(f"✗ {name}: {e}")
+            self.progress.emit(index, "Failed", 0)
+            return
+        self.log.emit(f"Installing {name}")
+        while True:
             try:
-                resp = self._post("install", {"type": "direct", "packages": [url]})
-                task_id = int(resp["task_id"])
-            except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
-                self.log.emit(f"✗ {name}: {e}")
-                self.progress.emit(index, "Failed", 0)
-                continue
+                st = self._post("get_task_progress", {"task_id": task_id})
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                self.log.emit(f"… progress error: {e}")
+                break
+            transferred = int(st.get("transferred", 0))
+            total = int(st.get("length_total", 0)) or 1
+            rest = int(st.get("rest_sec", 0))
+            pct = int(transferred / total * 100) if transferred else 0
+            eta = str(datetime.timedelta(seconds=rest))
+            self.progress.emit(index, eta if transferred else "Installing…", pct)
+            if rest == 0 and transferred:
+                self.log.emit(f"✓ {name} ready ({convert_bytes(total)})")
+                self.progress.emit(index, "Done", 100)
+                break
+            time.sleep(1)
 
-            self.log.emit(f"Installing {name}")
-            while True:
-                try:
-                    st = self._post("get_task_progress", {"task_id": task_id})
-                except (urllib.error.URLError, OSError, ValueError) as e:
-                    self.log.emit(f"… progress error: {e}")
-                    break
-                transferred = int(st.get("transferred", 0))
-                total = int(st.get("length_total", 0)) or 1
-                rest = int(st.get("rest_sec", 0))
-                pct = int(transferred / total * 100) if transferred else 0
-                eta = str(datetime.timedelta(seconds=rest))
-                self.progress.emit(index, eta if transferred else "Installing…", pct)
-                if rest == 0 and transferred:
-                    self.log.emit(f"✓ {name} ready "
-                                  f"({convert_bytes(total)})")
-                    self.progress.emit(index, "Done", 100)
-                    break
-                time.sleep(1)
-        self.log.emit("All packages processed.")
-        self.finished_all.emit()
+    # ---- etaHEN DPI v2 (HTTP POST /upload, form url=…) ----
+    def _install_dpi_v2(self, index: int, url: str, name: str) -> None:
+        endpoint = f"http://{self.ps4_ip}:{DPI_V2_PORT}/upload"
+        body = urllib.parse.urlencode({"url": url}).encode("utf-8")
+        req = urllib.request.Request(
+            endpoint, body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        self.progress.emit(index, "Sending…", 0)
+        try:
+            resp = urllib.request.urlopen(req, timeout=20)
+            code = resp.getcode()
+        except urllib.error.HTTPError as e:
+            code = e.code
+        if 200 <= code < 400:
+            self.log.emit(f"✓ {name}: queued on PS5 (DPI v2) — "
+                          "watch the console screen for progress")
+            self.progress.emit(index, "Installing on PS5", 100)
+        else:
+            self.log.emit(f"✗ {name}: DPI v2 returned HTTP {code}")
+            self.progress.emit(index, "Failed", 0)
+
+    # ---- etaHEN DPI v1 (JSON over raw TCP :9090, reply {"res":"0"}) ----
+    def _install_dpi_v1(self, index: int, url: str, name: str) -> None:
+        payload = json.dumps({"url": url}).encode("utf-8")
+        self.progress.emit(index, "Sending…", 0)
+        with socket.create_connection((self.ps4_ip, DPI_V1_PORT), timeout=15) as s:
+            s.sendall(payload)
+            try:
+                reply = s.recv(256).decode("utf-8", "ignore")
+            except OSError:
+                reply = ""
+        res = None
+        try:
+            res = str(json.loads(reply).get("res"))
+        except (ValueError, AttributeError):
+            pass
+        if res == "0":
+            self.log.emit(f"✓ {name}: accepted on PS5 (DPI v1)")
+            self.progress.emit(index, "Installing on PS5", 100)
+        else:
+            self.log.emit(f"✗ {name}: DPI v1 res={res} ({reply.strip()})")
+            self.progress.emit(index, "Failed", 0)
