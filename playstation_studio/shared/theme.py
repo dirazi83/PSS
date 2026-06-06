@@ -292,6 +292,39 @@ def stylesheet() -> str:
         border: 1px solid {p.border}; border-radius: 6px; padding: 5px 8px;
     }}
 
+    /* ---- Menu bar + menus (esp. Windows, where the bar is in-window) ---- */
+    QMenuBar {{
+        background: {p.surface};
+        color: {p.text};
+        border-bottom: 1px solid {p.border};
+        padding: 2px 6px;
+    }}
+    QMenuBar::item {{
+        background: transparent;
+        color: {p.text};
+        padding: 6px 12px;
+        border-radius: 6px;
+    }}
+    QMenuBar::item:selected {{ background: {p.surface_alt}; color: {p.text}; }}
+    QMenuBar::item:pressed {{ background: {p.accent}; color: white; }}
+    QMenu {{
+        background: {p.surface_alt};
+        color: {p.text};
+        border: 1px solid {p.border};
+        border-radius: 8px;
+        padding: 6px;
+    }}
+    QMenu::item {{
+        background: transparent;
+        color: {p.text};
+        padding: 6px 28px 6px 12px;
+        border-radius: 6px;
+    }}
+    QMenu::item:selected {{ background: {p.accent}; color: white; }}
+    QMenu::item:disabled {{ color: {p.text_faint}; }}
+    QMenu::separator {{ height: 1px; background: {p.border}; margin: 6px 8px; }}
+    QMenu::indicator {{ width: 16px; height: 16px; left: 6px; }}
+
     QLabel#VersionBadge {{
         background: qlineargradient(x1:0 y1:0, x2:1 y2:0,
             stop:0 {p.accent}, stop:1 {p.accent_hover});

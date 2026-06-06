@@ -20,6 +20,8 @@ A modern PySide6 desktop app that combines two tools in one window:
 - **Export to Excel** (one sheet per category).
 - **Remote install** to a jailbroken PS4 (Remote PKG Installer on `:12800`) with a
   built-in HTTP server and live per-package progress.
+- **Auto-Detect** consoles on your LAN (Sony Device Discovery Protocol on
+  UDP 987/9302, plus a TCP fallback sweep for homebrew loader ports).
 - **Exploit host** — serve the bundled exploit-host site.
 
 ### PS5 PFS Compressor

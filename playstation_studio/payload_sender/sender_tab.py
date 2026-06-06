@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..shared.config import config
+from ..shared.detect_dialog import detect_console
 from ..shared.formatting import human_size
 from ..shared.theme import Palette
 from .sender import PORT_PRESETS, SUPPORTED_EXTS, PayloadSender
@@ -103,7 +104,14 @@ class PayloadSenderTab(QWidget):
         self.ip.setPlaceholderText("e.g. 192.168.1.30")
         self.ip.editingFinished.connect(
             lambda: config.set(CFG, "ip", self.ip.text().strip()))
-        lay.addWidget(self.ip)
+        ip_row = QHBoxLayout()
+        ip_row.setSpacing(6)
+        btn_detect = QPushButton("Auto-Detect")
+        btn_detect.setToolTip("Scan the network for a PS4/PS5 and fill the IP.")
+        btn_detect.clicked.connect(self.on_auto_detect)
+        ip_row.addWidget(self.ip, stretch=1)
+        ip_row.addWidget(btn_detect)
+        lay.addLayout(ip_row)
 
         lay.addWidget(self._field_label("Port"))
         self.port = QSpinBox()
@@ -150,6 +158,15 @@ class PayloadSenderTab(QWidget):
         lbl = QLabel(text)
         lbl.setStyleSheet(f"color:{Palette.text_dim}; font-size:12px; font-weight:600;")
         return lbl
+
+    def on_auto_detect(self) -> None:
+        console = detect_console(self)
+        if console:
+            self.ip.setText(console["ip"])
+            config.set(CFG, "ip", console["ip"])
+            self._log(f"Auto-detected {console.get('type','Console')} at "
+                      f"{console['ip']}"
+                      + (f"  ({console['name']})" if console.get("name") else ""))
 
     def _apply_preset(self, index: int) -> None:
         port = self.preset.itemData(index)

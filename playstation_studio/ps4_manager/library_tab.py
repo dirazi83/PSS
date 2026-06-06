@@ -20,6 +20,7 @@ from .remote_install import (
 )
 from .rename import BulkRenamer
 from ..shared.config import config
+from ..shared.detect_dialog import detect_console
 from ..shared.theme import Palette
 
 CFG = "ps4"
@@ -258,7 +259,14 @@ class Ps4LibraryTab(QWidget):
         self.ps4_ip.setPlaceholderText("PS4 IP address  (e.g. 192.168.1.20)")
         self.ps4_ip.editingFinished.connect(
             lambda: config.set(CFG, "ps4_ip", self.ps4_ip.text().strip()))
-        form.addWidget(self.ps4_ip)
+        ip_row = QHBoxLayout()
+        ip_row.setSpacing(6)
+        self.btn_detect = QPushButton("Auto-Detect")
+        self.btn_detect.setToolTip("Scan the network for a PS4/PS5 and fill the IP.")
+        self.btn_detect.clicked.connect(self.on_auto_detect)
+        ip_row.addWidget(self.ps4_ip, stretch=1)
+        ip_row.addWidget(self.btn_detect)
+        form.addLayout(ip_row)
         port_row = QHBoxLayout()
         self.server_ip = QComboBox()
         self.server_ip.addItem(local_ip())
@@ -523,6 +531,15 @@ class Ps4LibraryTab(QWidget):
         self._log(f"Exported library to {name}")
 
     # --------------------------------------------------------- remote install
+    def on_auto_detect(self) -> None:
+        console = detect_console(self, prefer_type="PS4")
+        if console:
+            self.ps4_ip.setText(console["ip"])
+            config.set(CFG, "ps4_ip", console["ip"])
+            self._log(f"Auto-detected {console.get('type','Console')} at "
+                      f"{console['ip']}"
+                      + (f"  ({console['name']})" if console.get("name") else ""))
+
     def on_test(self) -> None:
         if not self.ps4_ip.text().strip():
             QMessageBox.information(self, "PS4 IP", "Enter your PS4's IP address.")
