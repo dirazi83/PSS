@@ -10,9 +10,11 @@ import hashlib
 import hmac
 import json
 import multiprocessing as mp
+import os
 import queue
 import shutil
 import struct
+import sys
 import time
 import uuid
 import zlib
@@ -1383,12 +1385,92 @@ def _drain_compression_progress_queue(progress_queue: SupportsIntQueue) -> int:
     return drained_bytes
 
 
+def usable_memory_bytes() -> int | None:
+    """Best-effort estimate of memory usable for compression workers.
+
+    Prefers the OS-reported available physical memory and falls back to total
+    physical memory. Used to keep auto worker selection from exhausting RAM on
+    low-memory systems.
+
+    Returns:
+        Usable memory in bytes, or ``None`` when it cannot be determined.
+    """
+    # Linux: MemAvailable is the most accurate "usable now" figure.
+    try:
+        with open("/proc/meminfo", "r", encoding="ascii") as meminfo:
+            for line in meminfo:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+
+    # Windows: GlobalMemoryStatusEx reports available physical memory directly.
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+
+            class _MemoryStatusEx(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status: _MemoryStatusEx = _MemoryStatusEx()
+            status.dwLength = ctypes.sizeof(_MemoryStatusEx)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.ullAvailPhys)
+        except (OSError, AttributeError, ValueError):
+            pass
+
+    # POSIX fallback (notably macOS): total physical memory.
+    try:
+        page_size: int = os.sysconf("SC_PAGE_SIZE")
+        phys_pages: int = os.sysconf("SC_PHYS_PAGES")
+        if page_size > 0 and phys_pages > 0:
+            return page_size * phys_pages
+    except (OSError, ValueError, AttributeError):
+        pass
+
+    return None
+
+
+def worker_memory_budget_bytes() -> int:
+    """Per-worker memory budget used to cap auto worker selection.
+
+    Defaults to 1 GiB and can be overridden with the
+    ``MKPFS_WORKER_MEMORY_BUDGET`` environment variable (bytes).
+
+    Returns:
+        Per-worker memory budget in bytes, always at least 1.
+    """
+    raw: str | None = os.environ.get("MKPFS_WORKER_MEMORY_BUDGET")
+    if raw:
+        try:
+            value: int = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return 1024 * 1024 * 1024
+
+
 def resolve_compression_worker_count(*, requested_cpu_count: int) -> int:
     """Resolve the effective compression worker count for the current workload.
 
+    When auto-selecting (``requested_cpu_count == 0``), the count is capped by
+    usable system memory so parallel file workers do not exhaust RAM on
+    low-memory machines. An explicit non-zero request is honored as-is.
+
     Args:
         requested_cpu_count: Requested worker count from CLI, where ``0`` means
-            auto-select with ``max(1, cpu_count())``.
+            auto-select with ``max(1, cpu_count())`` capped by usable memory.
 
     Returns:
         Effective worker count, always at least ``1``.
@@ -1402,6 +1484,11 @@ def resolve_compression_worker_count(*, requested_cpu_count: int) -> int:
     resolved_count: int
     if requested_cpu_count == 0:
         resolved_count = max(1, mp.cpu_count())
+        # Cap auto worker count by usable memory to stay low-memory friendly.
+        usable: int | None = usable_memory_bytes()
+        if usable is not None and usable > 0:
+            memory_capped: int = max(1, usable // worker_memory_budget_bytes())
+            resolved_count = min(resolved_count, memory_capped)
     else:
         resolved_count = requested_cpu_count
 

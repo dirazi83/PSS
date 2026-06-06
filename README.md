@@ -137,9 +137,19 @@ MkPFS/                   # bundled upstream PS5 compression engine
 run.sh
 ```
 
+## Credits
+
+- **PS5 compression engine: [MkPFS](https://github.com/PSBrew/MkPFS) by PSBrew.**
+  The PS5 PFS Compressor is a front-end over MkPFS (bundled in `MkPFS/`).
+- Inspired by **[PS5-FFPFSC-PRO](https://github.com/KINGDKAK/PS5-FFPFSC-PRO)**
+  by KINGDKAK.
+- PS5 remote install uses **etaHEN** DPI; PS4 uses the Remote PKG Installer.
+
 ## Notes
 
 - The PS4 logic is a modernized port of the original PS4 PKGs Manager: the
   Twisted server was replaced with Python's stdlib `http.server`, and Excel
   export now uses `openpyxl` — fewer, lighter, cross-platform dependencies.
 - MkPFS is GPLv3 (see `MkPFS/LICENSE`). This GUI is a separate front-end.
+- **Low-memory compression:** auto worker count is capped by usable RAM, and the
+  PS5 tab has a "Low-memory mode" (1 core) for machines with little free memory.

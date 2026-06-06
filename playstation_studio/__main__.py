@@ -16,6 +16,8 @@ def _maybe_run_mkpfs() -> bool:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()    # safe no-op from source; needed if frozen
     if _maybe_run_mkpfs():
         raise SystemExit(0)
     from .app import main

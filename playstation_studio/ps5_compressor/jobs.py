@@ -84,6 +84,7 @@ class PackSettings:
     require_game_files: bool = False
     skip_executable_compression: bool = True
     cpu_count: int = 0              # 0 = auto/all
+    low_memory: bool = False        # cap to 1 worker to minimise peak RAM
     overwrite: bool = False         # re-pack even if output exists
 
 
@@ -159,8 +160,11 @@ class Job:
             cmd += ["--compression-level", str(settings.compression_level)]
         if settings.skip_executable_compression:
             cmd += ["--skip-executable-compression"]
-        if settings.cpu_count > 0:
-            cmd += ["--cpu-count", str(settings.cpu_count)]
+        # Low-memory mode forces a single worker (one file at a time) to keep
+        # peak RAM low; otherwise honour the requested cpu count (0 = auto).
+        effective_cpu = 1 if settings.low_memory else settings.cpu_count
+        if effective_cpu > 0:
+            cmd += ["--cpu-count", str(effective_cpu)]
         if settings.verify:
             cmd += ["--verify"]
         if settings.encrypted:

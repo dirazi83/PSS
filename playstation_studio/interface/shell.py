@@ -128,7 +128,16 @@ class MainWindow(QMainWindow):
             "<li><b>Payload Sender</b> — send ELF/BIN/JAR over TCP</li>"
             "<li><b>FTP Client</b> — dual-pane transfers</li>"
             "</ul>"
-            "<p style='color:#9aa0b4'>Built with Python &amp; PySide6.</p>")
+            "<p style='color:#9aa0b4'>Built with Python &amp; PySide6.</p>"
+            "<hr><p><b>Credits</b></p>"
+            "<ul>"
+            "<li>PS5 compression engine: <b>MkPFS</b> by PSBrew — "
+            "<a href='https://github.com/PSBrew/MkPFS'>github.com/PSBrew/MkPFS</a></li>"
+            "<li>Inspired by <b>PS5-FFPFSC-PRO</b> by KINGDKAK — "
+            "<a href='https://github.com/KINGDKAK/PS5-FFPFSC-PRO'>"
+            "github.com/KINGDKAK/PS5-FFPFSC-PRO</a></li>"
+            "<li>PS5 install: <b>etaHEN</b> DPI · PS4 install: Remote PKG Installer</li>"
+            "</ul>")
 
     # =============================================================== nav
     def _on_tab_changed(self, index: int) -> None:

@@ -5,6 +5,7 @@ can freeze it. Also handles the ``--run-mkpfs`` self re-invocation used by the
 PS5 compressor when there is no system Python.
 """
 
+import multiprocessing
 import sys
 
 
@@ -19,4 +20,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # MUST be first: in a frozen build, mkpfs spawns compression workers by
+    # re-launching THIS executable. freeze_support() makes those re-launches
+    # act as multiprocessing workers instead of re-opening the app/CLI.
+    multiprocessing.freeze_support()
     raise SystemExit(main())

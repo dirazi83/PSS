@@ -222,12 +222,23 @@ class Ps5CompressTab(QWidget):
         self.cb_verify = QCheckBox("Verify after packing")
         self.cb_encrypt = QCheckBox("Encrypt blocks (AES-XTS)")
         self.cb_require = QCheckBox("Require game files")
+        self.cb_lowmem = QCheckBox("Low-memory mode (1 core, slower)")
+        self.cb_lowmem.setToolTip("Compress one file at a time to minimise peak "
+                                  "RAM. Use on machines with little free memory.")
+        self.cb_lowmem.setChecked(bool(config.get(CFG, "low_memory", False)))
+        self.cb_lowmem.toggled.connect(
+            lambda on: config.set(CFG, "low_memory", on))
         self.cb_overwrite = QCheckBox("Overwrite existing images")
         for cb in (self.cb_skipexec, self.cb_verify, self.cb_encrypt,
-                   self.cb_require, self.cb_overwrite):
+                   self.cb_require, self.cb_lowmem, self.cb_overwrite):
             lay.addWidget(cb)
 
         lay.addStretch(1)
+        credit = QLabel('Compression engine: <a href="https://github.com/PSBrew/MkPFS">'
+                        'MkPFS</a> by PSBrew')
+        credit.setOpenExternalLinks(True)
+        credit.setStyleSheet(f"color:{Palette.text_faint}; font-size:11px;")
+        lay.addWidget(credit)
         return panel
 
     def _field_label(self, text: str) -> QLabel:
@@ -403,6 +414,7 @@ class Ps5CompressTab(QWidget):
             require_game_files=self.cb_require.isChecked(),
             skip_executable_compression=self.cb_skipexec.isChecked(),
             cpu_count=self.cpu.value(),
+            low_memory=self.cb_lowmem.isChecked(),
             overwrite=self.cb_overwrite.isChecked(),
         )
 
