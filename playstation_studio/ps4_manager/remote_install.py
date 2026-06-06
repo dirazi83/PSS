@@ -15,6 +15,7 @@ import functools
 import json
 import os
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -97,6 +98,8 @@ class _PkgHttpHandler(SimpleHTTPRequestHandler):
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
+        rel = urllib.parse.unquote(self.path.split("?", 1)[0])
+        owner = getattr(self.server, "owner", None)
         with open(path, "rb") as f:
             f.seek(start)
             remaining = length
@@ -109,19 +112,50 @@ class _PkgHttpHandler(SimpleHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     break
                 remaining -= len(chunk)
+                if owner is not None:
+                    owner.note_bytes(rel, len(chunk), size)
 
 
 class FolderHttpServer(QThread):
     """Serve a directory over HTTP so the console can pull packages from it."""
 
-    started_ok = Signal(int)        # port
+    started_ok = Signal(int)            # port
     failed = Signal(str)
+    progress = Signal(str, int, int)    # rel_path (decoded, leading '/'), sent, total
+    completed = Signal(str)             # rel_path
 
     def __init__(self, directory: str, port: int, parent=None) -> None:
         super().__init__(parent)
         self.directory = directory
         self.port = int(port)
         self._httpd: ThreadingHTTPServer | None = None
+        self._lock = threading.Lock()
+        self._served: dict[str, int] = {}
+        self._last_emit: dict[str, int] = {}
+        self._done: set[str] = set()
+
+    def reset_counters(self) -> None:
+        with self._lock:
+            self._served.clear()
+            self._last_emit.clear()
+            self._done.clear()
+
+    def note_bytes(self, rel: str, n: int, total: int) -> None:
+        """Called from request threads as bytes stream to the console."""
+        with self._lock:
+            served = self._served.get(rel, 0) + n
+            self._served[rel] = served
+            emit_progress = served - self._last_emit.get(rel, 0) >= 1_000_000
+            if emit_progress:
+                self._last_emit[rel] = served
+            finished = total and served >= total and rel not in self._done
+            if finished:
+                self._done.add(rel)
+        if emit_progress:
+            self.progress.emit(rel, min(served, total), total)
+        if finished:
+            self.progress.emit(rel, total, total)
+            self.completed.emit(rel)
 
     def run(self) -> None:
         if not os.path.isdir(self.directory):
@@ -133,6 +167,7 @@ class FolderHttpServer(QThread):
         except OSError as e:
             self.failed.emit(f"Cannot bind port {self.port}: {e}")
             return
+        self._httpd.owner = self          # handlers report bytes back to us
         self.started_ok.emit(self.port)
         self._httpd.serve_forever()
 
@@ -280,7 +315,8 @@ class RemoteInstaller(QThread):
         #   "SUCCESS: …Task started"  or  "FAILED: …error …, code 0x…"
         if text.upper().startswith("SUCCESS"):
             self.log.emit(f"✓ {name}: {text}")
-            self.progress.emit(index, "Started — see PS5", 100)
+            # leave the bar at 0 — the HTTP server drives it as the PS5 downloads
+            self.progress.emit(index, "Downloading to PS5…", 0)
         else:
             self.log.emit(f"✗ {name}: {text or 'no response from DPI v2'}")
             self.progress.emit(index, "Failed", 0)
@@ -302,7 +338,7 @@ class RemoteInstaller(QThread):
             pass
         if res == "0":
             self.log.emit(f"✓ {name}: accepted on PS5 (DPI v1)")
-            self.progress.emit(index, "Installing on PS5", 100)
+            self.progress.emit(index, "Downloading to PS5…", 0)
         else:
             self.log.emit(f"✗ {name}: DPI v1 res={res} ({reply.strip()})")
             self.progress.emit(index, "Failed", 0)

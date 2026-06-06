@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
+import time
 
 from PySide6.QtCore import QSortFilterProxyModel, Qt, QThread, Signal
 from PySide6.QtGui import QImage, QPixmap, QStandardItem, QStandardItemModel
@@ -22,6 +23,7 @@ from .remote_install import (
 from .rename import BulkRenamer
 from ..shared.config import config
 from ..shared.detect_dialog import detect_console
+from ..shared.formatting import human_size
 from ..shared.theme import Palette
 
 CFG = "ps4"
@@ -97,10 +99,14 @@ class Ps4LibraryTab(QWidget):
         self.proxies: dict[str, QSortFilterProxyModel] = {}
         self.views: dict[str, QTableView] = {}
         self._server: FolderHttpServer | None = None
+        self._server_wired = False
         self._exploit: ExploitHost | None = None
         self._scan: ScanWorker | None = None
         self._scanning = False
         self.scanned_root = ""
+        self._install_bars: dict[int, QProgressBar] = {}
+        self._dl_rows: dict[str, int] = {}      # served rel-path -> install row
+        self._dl_start: dict[int, float] = {}   # row -> download start time
         self._syncing = False        # guard while mirroring related checks
 
         body = QHBoxLayout(self)
@@ -612,6 +618,21 @@ class Ps4LibraryTab(QWidget):
                 lambda p: self._log(f"HTTP server serving packages on port {p}"))
             self._server.failed.connect(lambda m: self._log(f"Server: {m}"))
             self._server.start()
+        if not self._server_wired:
+            self._server.progress.connect(self._on_download_progress)
+            self._server.completed.connect(self._on_download_complete)
+            self._server_wired = True
+        self._server.reset_counters()
+
+        # map each pkg's served URL path → its install row, so the HTTP server's
+        # byte counter can drive that row's progress bar (PS5 downloads from us).
+        self._install_bars.clear()
+        self._dl_rows.clear()
+        self._dl_start.clear()
+        for r in range(rows):
+            rel = os.path.relpath(paths[r], self.scanned_root).replace(os.sep, "/")
+            self._dl_rows["/" + rel] = r
+
         self.btn_install.setEnabled(False)
         self._installer = RemoteInstaller(
             self.server_ip.currentText(), paths, self.ps4_ip.text().strip(),
@@ -623,13 +644,41 @@ class Ps4LibraryTab(QWidget):
             lambda: self.btn_install.setEnabled(True))
         self._installer.start()
 
+    def _row_bar(self, row: int) -> QProgressBar:
+        bar = self._install_bars.get(row)
+        if bar is None:
+            bar = QProgressBar()
+            bar.setValue(0)
+            self.install_view.setIndexWidget(self.install_model.index(row, 5), bar)
+            self._install_bars[row] = bar
+        return bar
+
+    def _on_download_progress(self, rel: str, sent: int, total: int) -> None:
+        row = self._dl_rows.get(rel)
+        if row is None:
+            return
+        pct = min(100, int(sent / total * 100)) if total else 0
+        self._row_bar(row).setValue(pct)
+        start = self._dl_start.setdefault(row, time.time())
+        speed = sent / max(time.time() - start, 1e-6)
+        self.install_model.setItem(
+            row, 4, QStandardItem(f"{human_size(sent)} / {human_size(total)}"
+                                  f"  ·  {human_size(speed)}/s"))
+
+    def _on_download_complete(self, rel: str) -> None:
+        row = self._dl_rows.get(rel)
+        if row is None:
+            return
+        self._row_bar(row).setValue(100)
+        self.install_model.setItem(
+            row, 4, QStandardItem("Downloaded ✓ — installing on PS5"))
+        self._log(f"✓ PS5 finished downloading: {os.path.basename(rel)}")
+
     def _on_install_progress(self, index: int, eta: str, pct: int) -> None:
         if index >= self.install_model.rowCount():
             return
         self.install_model.setItem(index, 4, QStandardItem(eta))
-        bar = QProgressBar()
-        bar.setValue(pct)
-        self.install_view.setIndexWidget(self.install_model.index(index, 5), bar)
+        self._row_bar(index).setValue(pct)
 
     # ---------------------------------------------------------------- misc
     def _log(self, text: str) -> None:
