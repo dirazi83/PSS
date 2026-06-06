@@ -45,13 +45,74 @@ def method_api_port(method: str) -> int:
     return DPI_V1_PORT if method == METHOD_PS5_DPI_V1 else 12800
 
 
-class _QuietHandler(SimpleHTTPRequestHandler):
-    def log_message(self, *args) -> None:  # silence request logging
+class _PkgHttpHandler(SimpleHTTPRequestHandler):
+    """Quiet static handler with HTTP Range (206) support.
+
+    PS4/PS5 background download managers request packages in byte ranges;
+    the stdlib handler ignores ``Range`` and always returns 200 + the whole
+    file, which makes console installs stall. This adds proper 206/416.
+    """
+
+    def log_message(self, *args) -> None:
         pass
+
+    def end_headers(self) -> None:
+        # advertise range support on every response
+        self.send_header("Accept-Ranges", "bytes")
+        super().end_headers()
+
+    def do_GET(self) -> None:
+        path = self.translate_path(self.path)
+        if os.path.isdir(path):
+            return super().do_GET()
+        if not os.path.isfile(path):
+            self.send_error(404, "File not found")
+            return
+        size = os.path.getsize(path)
+        ctype = self.guess_type(path)
+        rng = self.headers.get("Range")
+        start, end, partial = 0, size - 1, False
+        if rng and rng.startswith("bytes="):
+            partial = True
+            first, _, last = rng[6:].partition("-")
+            try:
+                if first == "":                 # suffix form: bytes=-N
+                    start = max(0, size - int(last))
+                    end = size - 1
+                else:
+                    start = int(first)
+                    end = int(last) if last else size - 1
+                if start > end or start >= size:
+                    raise ValueError
+                end = min(end, size - 1)
+            except ValueError:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+        length = end - start + 1
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(length))
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        with open(path, "rb") as f:
+            f.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = f.read(min(262144, remaining))
+                if not chunk:
+                    break
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    break
+                remaining -= len(chunk)
 
 
 class FolderHttpServer(QThread):
-    """Serve a directory over HTTP so the PS4 can pull packages from it."""
+    """Serve a directory over HTTP so the console can pull packages from it."""
 
     started_ok = Signal(int)        # port
     failed = Signal(str)
@@ -66,7 +127,7 @@ class FolderHttpServer(QThread):
         if not os.path.isdir(self.directory):
             self.failed.emit(f"Folder does not exist: {self.directory}")
             return
-        handler = functools.partial(_QuietHandler, directory=self.directory)
+        handler = functools.partial(_PkgHttpHandler, directory=self.directory)
         try:
             self._httpd = ThreadingHTTPServer(("0.0.0.0", self.port), handler)
         except OSError as e:
@@ -203,22 +264,25 @@ class RemoteInstaller(QThread):
     # ---- etaHEN DPI v2 (HTTP POST /upload, form url=…) ----
     def _install_dpi_v2(self, index: int, url: str, name: str) -> None:
         endpoint = f"http://{self.ps4_ip}:{DPI_V2_PORT}/upload"
-        body = urllib.parse.urlencode({"url": url}).encode("utf-8")
+        # etaHEN can also receive content_id/content_name to label the install
+        fields = {"url": url}
+        body = urllib.parse.urlencode(fields).encode("utf-8")
         req = urllib.request.Request(
             endpoint, body,
             headers={"Content-Type": "application/x-www-form-urlencoded"})
-        self.progress.emit(index, "Sending…", 0)
+        self.progress.emit(index, "Requesting…", 0)
         try:
-            resp = urllib.request.urlopen(req, timeout=20)
-            code = resp.getcode()
+            resp = urllib.request.urlopen(req, timeout=30)
+            text = resp.read().decode("utf-8", "ignore").strip()
         except urllib.error.HTTPError as e:
-            code = e.code
-        if 200 <= code < 400:
-            self.log.emit(f"✓ {name}: queued on PS5 (DPI v2) — "
-                          "watch the console screen for progress")
-            self.progress.emit(index, "Installing on PS5", 100)
+            text = f"HTTP {e.code}: {e.read().decode('utf-8', 'ignore')[:200]}"
+        # etaHEN ALWAYS returns HTTP 200; the real result is in the body:
+        #   "SUCCESS: …Task started"  or  "FAILED: …error …, code 0x…"
+        if text.upper().startswith("SUCCESS"):
+            self.log.emit(f"✓ {name}: {text}")
+            self.progress.emit(index, "Started — see PS5", 100)
         else:
-            self.log.emit(f"✗ {name}: DPI v2 returned HTTP {code}")
+            self.log.emit(f"✗ {name}: {text or 'no response from DPI v2'}")
             self.progress.emit(index, "Failed", 0)
 
     # ---- etaHEN DPI v1 (JSON over raw TCP :9090, reply {"res":"0"}) ----
