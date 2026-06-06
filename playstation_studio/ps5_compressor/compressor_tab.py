@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QTextCursor
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import (
+    QColor, QDragEnterEvent, QDropEvent, QIcon, QTextCursor,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QFileDialog, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListView, QMessageBox,
@@ -101,7 +103,8 @@ class Ps5CompressTab(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setDefaultSectionSize(46)
+        self.table.setIconSize(QSize(40, 40))     # show game cover thumbnails
+        self.table.verticalHeader().setDefaultSectionSize(48)
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)
         for i in range(1, len(self.COLS)):
@@ -301,7 +304,10 @@ class Ps5CompressTab(QWidget):
         self.table.insertRow(r)
 
         name_item = QTableWidgetItem("  " + job.name)
-        name_item.setToolTip(job.source_dir)
+        name_item.setToolTip(
+            f"{job.title}\n{job.source_dir}" if job.title else job.source_dir)
+        if job.icon_path:
+            name_item.setIcon(QIcon(job.icon_path))
         self.table.setItem(r, 0, name_item)
 
         self.table.setItem(r, 1, self._status_item(job))

@@ -2,11 +2,41 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+
+
+def read_ps5_meta(folder: str) -> tuple[str, str]:
+    """Return ``(title, icon_path)`` for a PS5 dump folder.
+
+    Reads the display title from ``sce_sys/param.json`` and locates the cover
+    icon ``sce_sys/icon0.png``. Both are best-effort; missing pieces come back
+    as empty strings.
+    """
+    sce = Path(folder) / "sce_sys"
+    title = ""
+    param = sce / "param.json"
+    if param.is_file():
+        try:
+            with open(param, encoding="utf-8") as fh:
+                data = json.load(fh)
+            localized = data.get("localizedParameters", {})
+            default_lang = localized.get("defaultLanguage")
+            if isinstance(localized.get(default_lang), dict):
+                title = localized[default_lang].get("titleName", "") or ""
+            if not title:
+                for value in localized.values():
+                    if isinstance(value, dict) and value.get("titleName"):
+                        title = value["titleName"]
+                        break
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+    icon = sce / "icon0.png"
+    return title, (str(icon) if icon.is_file() else "")
 
 
 def mkpfs_command() -> list[str]:
@@ -102,10 +132,15 @@ class Job:
     size_in: int = 0
     size_out: int = 0
     elapsed: float = 0.0
+    title: str = ""                 # from sce_sys/param.json
+    icon_path: str = ""             # sce_sys/icon0.png
 
     def __post_init__(self) -> None:
+        meta_title, icon = read_ps5_meta(self.source_dir)
+        self.title = meta_title
+        self.icon_path = icon
         if not self.name:
-            self.name = Path(self.source_dir).name
+            self.name = meta_title or Path(self.source_dir).name
 
     # ---- helpers ----
     @property
