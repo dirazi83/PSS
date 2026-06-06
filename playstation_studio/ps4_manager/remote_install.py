@@ -121,7 +121,8 @@ class FolderHttpServer(QThread):
 
     started_ok = Signal(int)            # port
     failed = Signal(str)
-    progress = Signal(str, int, int)    # rel_path (decoded, leading '/'), sent, total
+    # byte counts can exceed 2 GB → use 64-bit (qlonglong), not Qt int (32-bit)
+    progress = Signal(str, "qlonglong", "qlonglong")  # rel_path, sent, total
     completed = Signal(str)             # rel_path
 
     def __init__(self, directory: str, port: int, parent=None) -> None:
