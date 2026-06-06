@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from .jobs import Job, PackSettings, Status, find_game_dirs
 from .runner import BatchRunner
 from ..shared.config import config
+from ..shared.diskutil import is_network_path
 from ..shared.theme import Palette
 from ..shared.formatting import human_size
 
@@ -424,6 +425,22 @@ class Ps5CompressTab(QWidget):
         if not self.jobs:
             QMessageBox.information(self, "Nothing to do", "Add at least one game first.")
             return
+        # Warn if any source lives on a slow network share (SMB/NFS): reading
+        # thousands of game files over the network is very slow and looks frozen.
+        net_jobs = [j for j in self.jobs if is_network_path(j.source_dir)]
+        if net_jobs:
+            names = "\n".join(f"  • {j.name}" for j in net_jobs[:6])
+            more = f"\n  …and {len(net_jobs) - 6} more" if len(net_jobs) > 6 else ""
+            choice = QMessageBox.warning(
+                self, "Game is on a network drive",
+                f"{len(net_jobs)} game(s) are on a network share:\n{names}{more}\n\n"
+                "Compressing reads every file over the network, which is very "
+                "slow (often many minutes with little visible progress) and can "
+                "look frozen.\n\nFor much faster compression, copy the game to a "
+                "local disk first.\n\nCompress from the network anyway?",
+                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+            if choice != QMessageBox.Yes:
+                return
         # reset transient state
         for j in self.jobs:
             if j.status != Status.DONE or self.cb_overwrite.isChecked():
@@ -456,27 +473,62 @@ class Ps5CompressTab(QWidget):
         self.runner.jobFinished.connect(self._on_job_finished)
         self.runner.batchFinished.connect(self._on_batch_finished)
 
+    # MkPFS is silent during scanning / temp-image build (no % line), which on
+    # games with many files looks like a hang. Detect the stage from its output
+    # and show a busy (indeterminate) bar so the user knows it's working.
+    _STAGE_KEYWORDS = (
+        ("Scanning", "Scanning files…"),
+        ("Compressing", "Compressing…"),
+        ("Writing PFS", "Writing image…"),
+        ("Writing", "Writing image…"),
+        ("Verifying", "Verifying…"),
+    )
+
+    def _set_busy(self, idx: int, label: str) -> None:
+        """Put a job's bar into an indeterminate 'working' state with a label."""
+        if idx < len(self.bars):
+            bar = self.bars[idx]
+            bar.setRange(0, 0)          # indeterminate (animated) bar
+            bar.setFormat(label)
+
     def _on_job_started(self, idx: int) -> None:
         self._update_row(idx)
+        self._set_busy(idx, "Preparing…")
         self.status_lbl.setText(f"Compressing  {self.jobs[idx].name}  "
-                                f"({idx + 1}/{len(self.jobs)})")
+                                f"({idx + 1}/{len(self.jobs)}) — preparing…")
         self.table.selectRow(idx)
 
     def _on_job_progress(self, idx: int, pct: int, phase: str) -> None:
         self.jobs[idx].progress = pct
         self.jobs[idx].phase = phase
         if idx < len(self.bars):
-            self.bars[idx].setValue(pct)
-            self.bars[idx].setFormat(f"{phase} {pct}%")
+            bar = self.bars[idx]
+            if bar.maximum() == 0:      # leaving the indeterminate state
+                bar.setRange(0, 100)
+            bar.setValue(pct)
+            bar.setFormat(f"{phase} {pct}%")
         self._update_overall()
 
     def _on_job_output(self, idx: int, text: str) -> None:
         name = self.jobs[idx].name if 0 <= idx < len(self.jobs) else "?"
         for line in text.splitlines():
-            if line.strip():
-                self._log(f"[{name}] {line}\n")
+            stripped = line.strip()
+            if not stripped:
+                continue
+            self._log(f"[{name}] {stripped}\n")
+            # surface the current stage on the busy bar + status line
+            for needle, label in self._STAGE_KEYWORDS:
+                if needle in stripped and idx < len(self.bars) \
+                        and self.bars[idx].maximum() == 0:
+                    self._set_busy(idx, label)
+                    self.status_lbl.setText(
+                        f"Compressing  {self.jobs[idx].name}  "
+                        f"({idx + 1}/{len(self.jobs)}) — {label}")
+                    break
 
     def _on_job_finished(self, idx: int, success: bool, message: str) -> None:
+        if idx < len(self.bars):        # leave indeterminate state on finish
+            self.bars[idx].setRange(0, 100)
         self._update_row(idx)
         job = self.jobs[idx]
         if job.status == Status.DONE:
