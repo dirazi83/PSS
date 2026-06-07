@@ -27,12 +27,19 @@ A modern PySide6 desktop app that combines two tools in one window:
 ### PS5 PFS Compressor
 - **Recursive Scan Folder** with adjustable depth, plus drag & drop.
 - **Game cover + real title** read from each dump's `sce_sys/`.
-- **Batch queue** with per-game progress, size in/out and space saved.
+- **Estimate (pre-flight)** — predicts the packed size and per-file block
+  padding *before* compressing (stat-only, so it's fast), and recommends auto
+  block size when a game would otherwise bloat.
 - **Auto block size** — games with thousands of tiny files (Minecraft, etc.)
   otherwise pack *larger* than the source because each file is padded to a
-  64 KiB block; auto-fit picks the block size that minimises that padding.
+  64 KiB block; auto-fit picks the block size that minimises that padding
+  (Minecraft: 2.26 GB → 1.09 GB).
+- **Batch queue** with per-game progress, size in/out, and a **compression
+  rating** (Excellent / Good / Okay / Poor).
+- **Weighted overall progress**, **storage-space pre-flight warning**,
+  **completion notification**, and a persisted **compression history** viewer.
 - **Configurable temp folder** — keep the compressor's intermediate data in the
-  app folder, beside the game, or on a fast/empty disk you pick.
+  app folder, beside the game, or on a fast/empty disk you pick (auto-cleaned).
 - **Slow-source warnings** — flags games on **network shares** or in **iCloud**
   (Desktop & Documents sync), the top causes of a pack that looks frozen.
 - **All the knobs** — compression level, CPU cores, verify, AES-XTS, etc.
