@@ -7,6 +7,7 @@ open a connection to ``ip:port`` and send the file.
 
 from __future__ import annotations
 
+import errno
 import os
 import socket
 
@@ -16,9 +17,9 @@ from ..shared.config import config
 
 # Common loader ports, shown as quick presets in the UI.
 PORT_PRESETS = [
-    ("PS5 · ELF/BIN (9021)", 9021),
-    ("PS5 · etaHEN (9090)", 9090),
-    ("PS4 · ELF (9020)", 9020),
+    ("PS5 · ELF loader (9021)", 9021),
+    ("PS4 · ELF loader (9020)", 9020),
+    ("PS5 · etaHEN cmd (9090)", 9090),
     ("JAR loader (9025)", 9025),
 ]
 
@@ -75,6 +76,29 @@ def scan_payloads(folder: str, max_depth: int = 6) -> list[str]:
     return sorted(found)
 
 
+def _explain(exc: OSError, ip: str, port: int) -> str:
+    """Turn a socket error into an actionable, human message."""
+    eno = getattr(exc, "errno", None)
+    if isinstance(exc, socket.gaierror):
+        return (f"Can't resolve “{ip}”. Enter the console's numeric IP "
+                "(e.g. 192.168.1.30), not a name.")
+    if isinstance(exc, (socket.timeout, TimeoutError)) or eno == errno.ETIMEDOUT:
+        return (f"Timed out reaching {ip}:{port}. Check the console IP, that "
+                "it's powered on and awake, and on the same Wi-Fi/LAN.")
+    if isinstance(exc, ConnectionRefusedError) or eno == errno.ECONNREFUSED:
+        return (f"Connection refused on {ip}:{port}. Nothing is listening "
+                "there — start the ELF/payload loader on the console first, "
+                "and check the port (PS5 ELF loader is usually 9021, PS4 9020).")
+    if isinstance(exc, ConnectionResetError) or eno == errno.ECONNRESET:
+        return (f"{ip}:{port} reset the connection — the loader closed early. "
+                "It may already be busy, or it rejected the payload. Reboot the "
+                "loader and try again.")
+    if eno in (errno.EHOSTUNREACH, errno.ENETUNREACH):
+        return (f"{ip} is unreachable. Check the IP and that this computer is "
+                "on the same network as the console.")
+    return f"Send failed → {ip}:{port}: {exc}"
+
+
 class PayloadSender(QThread):
     """Stream one file to ``ip:port`` and report progress / result."""
 
@@ -97,6 +121,7 @@ class PayloadSender(QThread):
         try:
             with open(self.path, "rb") as fh, \
                     socket.create_connection((self.ip, self.port), timeout=10) as sock:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 sent = 0
                 while True:
                     chunk = fh.read(_CHUNK)
@@ -105,8 +130,22 @@ class PayloadSender(QThread):
                     sock.sendall(chunk)
                     sent += len(chunk)
                     self.progress.emit(sent, total)
+                # signal end-of-data and give loaders that reply a moment to ack
+                ack = ""
+                try:
+                    sock.shutdown(socket.SHUT_WR)
+                    sock.settimeout(2.0)
+                    reply = sock.recv(256)
+                    if reply:
+                        ack = "  · " + reply.decode("utf-8", "replace").strip()[:80]
+                except OSError:
+                    pass
         except (OSError, socket.timeout) as exc:
-            self.done.emit(False, f"Send failed → {self.ip}:{self.port}: {exc}")
+            self.done.emit(False, _explain(exc, self.ip, self.port))
+            return
+        if sent < total:
+            self.done.emit(False, f"Only sent {sent:,}/{total:,} bytes to "
+                                  f"{self.ip}:{self.port} before the link dropped.")
             return
         self.done.emit(
-            True, f"Sent {name} → {self.ip}:{self.port}  ({sent:,} bytes)")
+            True, f"Sent {name} → {self.ip}:{self.port}  ({sent:,} bytes){ack}")
