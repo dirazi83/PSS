@@ -1,4 +1,4 @@
-"""PS4 PKG Manager tab: browse, inspect, rename, export, remote-install."""
+"""PKG Manager tab: browse, inspect, rename, export, remote-install."""
 
 from __future__ import annotations
 
@@ -219,7 +219,7 @@ class Ps4LibraryTab(QWidget):
         lay.addWidget(self.install_view)
 
         row = QHBoxLayout()
-        self.btn_install = QPushButton("▶  Install All to PS4")
+        self.btn_install = QPushButton("▶  Install All")
         self.btn_install.setObjectName("Primary")
         self.btn_install.clicked.connect(self.on_install_all)
         btn_clear = QPushButton("Clear")
@@ -534,7 +534,7 @@ class Ps4LibraryTab(QWidget):
 
     def on_export(self) -> None:
         name, _ = QFileDialog.getSaveFileName(
-            self, "Export to Excel", "PS4 Library.xlsx", "Excel (*.xlsx)")
+            self, "Export to Excel", "PKG Library.xlsx", "Excel (*.xlsx)")
         if not name:
             return
         try:

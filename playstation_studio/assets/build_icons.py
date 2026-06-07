@@ -97,28 +97,30 @@ def _extruded(letter, x, y, size, front, side, depth=16, font="Arial",
 
 
 def build_app_svg() -> str:
-    """App icon — original homage to the classic PS1 perspective logo,
-    reading "PSS": an upright 3-D blue "P" with two perspective "S" letters."""
+    """App icon — homage to the classic PlayStation perspective logo, reading
+    "SS" (PlayStation Studio).
+
+    Like the original "PS" mark (an upright letter in front of one laid flat in
+    perspective), but as two S's: an upright 3-D blue "S" in front, and a second
+    "S" lying on the floor in perspective with a yellow face and red sides.
+    """
     blue = "#2230b8"
+    blue_side = "#101a6e"
     yellow = "#f6c512"
     red = "#d81f2a"
-    # Two S letters lying on the "floor" (skewed + flattened), cascading right.
-    s_back = (
-        '<g transform="translate(352 388) skewX(-30) scale(1.35 1.0)">'
-        + _extruded("S", 0, 0, 210, yellow, red, depth=16, dx=1.1, dy=1.3)
+    # Second "S" lying on the floor: skewed + slightly flattened, set to the
+    # right and back so it reads as the trailing letter.
+    s_floor = (
+        '<g transform="translate(330 378) skewX(-27) scale(1.26 1.0)">'
+        + _extruded("S", 0, 0, 212, yellow, red, depth=15, dx=1.1, dy=1.4)
         + "</g>"
     )
+    # Front "S" stands upright on the left, in brand blue with a deep extrude.
     s_front = (
-        '<g transform="translate(262 372) skewX(-30) scale(1.35 1.0)">'
-        + _extruded("S", 0, 0, 210, yellow, red, depth=16, dx=1.1, dy=1.3)
-        + "</g>"
-    )
-    # The P stands upright in front, on the left.
-    p_group = (
-        '<g transform="translate(168 318)">'
-        + _extruded("P", 0, 0, 300, blue, red, depth=20, dx=1.5, dy=1.5)
+        '<g transform="translate(186 322)">'
+        + _extruded("S", 0, 0, 300, blue, blue_side, depth=20, dx=1.5, dy=1.5)
         + '<text x="0" y="0" font-family="Arial" font-weight="900" '
-          f'font-size="300" text-anchor="middle" fill="{blue}">P</text>'
+          f'font-size="300" text-anchor="middle" fill="{blue}">S</text>'
         + "</g>"
     )
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
@@ -131,9 +133,8 @@ def build_app_svg() -> str:
   <rect x="32" y="32" width="448" height="448" rx="112" fill="url(#bg)"/>
   <rect x="33.5" y="33.5" width="445" height="445" rx="110"
         fill="none" stroke="#d4d7e0" stroke-width="3"/>
-  {s_back}
+  {s_floor}
   {s_front}
-  {p_group}
 </svg>
 """
 
@@ -196,11 +197,53 @@ def write_app_ico() -> bool:
     return True
 
 
+def write_app_icns() -> bool:
+    """Write a macOS app.icns from the rendered app PNGs (macOS only).
+
+    Uses the system `iconutil`; skipped (with a note) off macOS or if the tool
+    isn't available. Without this, the .app would keep a stale icon since the
+    build only refreshes app.ico.
+    """
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+
+    if sys.platform != "darwin" or shutil.which("iconutil") is None:
+        print("note: not macOS / no iconutil — skipping app.icns")
+        return False
+    # iconutil expects an .iconset folder with specific @1x/@2x file names.
+    iconset_map = {
+        "icon_16x16.png": 16, "icon_16x16@2x.png": 32,
+        "icon_32x32.png": 32, "icon_32x32@2x.png": 64,
+        "icon_128x128.png": 128, "icon_128x128@2x.png": 256,
+        "icon_256x256.png": 256, "icon_256x256@2x.png": 512,
+        "icon_512x512.png": 512, "icon_512x512@2x.png": 1024,
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        iconset = os.path.join(tmp, "app.iconset")
+        os.makedirs(iconset, exist_ok=True)
+        try:
+            import shutil as _sh
+            for fname, size in iconset_map.items():
+                src = os.path.join(ICON_DIR, f"app_{size}.png")
+                _sh.copyfile(src, os.path.join(iconset, fname))
+            subprocess.run(
+                ["iconutil", "-c", "icns", iconset,
+                 "-o", os.path.join(HERE, "app.icns")],
+                check=True, capture_output=True)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            print(f"note: app.icns generation failed: {exc}")
+            return False
+    return True
+
+
 def main() -> None:
     svgs = build_svgs()
     n = render_pngs(svgs)
     ico = "app.ico, " if write_app_ico() else ""
-    print(f"Wrote {len(svgs)} SVGs, {n} PNGs, {ico}to {os.path.relpath(HERE)}")
+    icns = "app.icns, " if write_app_icns() else ""
+    print(f"Wrote {len(svgs)} SVGs, {n} PNGs, {ico}{icns}to {os.path.relpath(HERE)}")
 
 
 if __name__ == "__main__":

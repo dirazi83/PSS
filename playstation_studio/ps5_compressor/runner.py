@@ -32,7 +32,9 @@ class BatchRunner(QObject):
         super().__init__(parent)
         self.jobs: list[Job] = []
         self.settings = PackSettings()
-        self._index = -1
+        self._order: list[int] = []     # job indices to process, in order
+        self._pos = -1                  # position within self._order
+        self._index = -1                # current job index (into self.jobs)
         self._proc: QProcess | None = None
         self._stop_requested = False
         self._stderr_buf = ""
@@ -45,9 +47,16 @@ class BatchRunner(QObject):
         return self._proc is not None
 
     # ------------------------------------------------------------------ start
-    def start(self, jobs: list[Job], settings: PackSettings) -> None:
+    def start(self, jobs: list[Job], settings: PackSettings,
+              indices: list[int] | None = None) -> None:
+        """Run *jobs*. If *indices* is given, only those positions in *jobs*
+        are processed (e.g. "Compress Selected"); the full list is still kept
+        so emitted signal indices line up with the UI rows."""
         self.jobs = jobs
         self.settings = settings
+        self._order = (list(indices) if indices is not None
+                       else list(range(len(jobs))))
+        self._pos = -1
         self._index = -1
         self._stop_requested = False
         self._done = 0
@@ -67,10 +76,11 @@ class BatchRunner(QObject):
             self.batchFinished.emit(self._done, self._failed)
             return
 
-        self._index += 1
-        if self._index >= len(self.jobs):
+        self._pos += 1
+        if self._pos >= len(self._order):
             self.batchFinished.emit(self._done, self._failed)
             return
+        self._index = self._order[self._pos]
 
         job = self.jobs[self._index]
 
@@ -179,7 +189,8 @@ class BatchRunner(QObject):
         self._next()
 
     def _mark_remaining_stopped(self) -> None:
-        for j in range(self._index, len(self.jobs)):
+        # Stop the current and any not-yet-started jobs in the run order.
+        for j in self._order[max(self._pos, 0):]:
             job = self.jobs[j]
             if job.status in (Status.QUEUED, Status.RUNNING):
                 job.status = Status.STOPPED

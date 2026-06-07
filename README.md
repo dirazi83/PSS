@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="playstation_studio/assets/icons/app_512.png" width="128" alt="PlayStation Studio icon"/>
+
 # PlayStation Studio
 
 ### All-in-one toolkit for PS4 / PS5 homebrew — FTP client, payload sender, PKG manager & PFS compressor
@@ -7,7 +9,7 @@
 **Version 1.0.0 — Initial Release**
 
 A modern, cross-platform desktop application built with Python and PySide6. PlayStation
-Studio brings a dual-pane FTP client, a network payload sender, a PS4 PKG library
+Studio brings a dual-pane FTP client, a network payload sender, a PKG library
 manager, and a PS5 PFS compressor together in one clean, dark-themed window.
 
 ![PlayStation Studio — FTP Client](docs/screenshots/ftp-client.png)
@@ -51,7 +53,7 @@ single, consistent interface:
 | --- | --- |
 | **FTP Client** | FileZilla-style dual-pane browser with a full transfer queue, for managing files on a console's FTP server. |
 | **Payload Sender** | Streams `.elf` / `.bin` / `.jar` and other payloads to a console's loader over TCP. |
-| **PS4 · PKG Manager** | Scans, inspects, renames, exports and remote-installs PS4 `.pkg` files. |
+| **PKG Manager** | Scans, inspects, renames, exports and remote-installs PS4 `.pkg` files. |
 | **PS5 · PFS Compressor** | Batch-compresses PS5 game dumps into PFS images via the bundled [MkPFS](https://github.com/PSBrew/MkPFS) engine. |
 
 Everything runs locally. Settings persist between sessions, the LAN is scanned to find
@@ -73,10 +75,10 @@ end users who don't have Python installed.
 - 🔒 **Secure Site Manager** — saved connections with passwords stored in your OS keyring.
 - 🚀 **Payload sender** — send single, selected or all payloads with per-file status,
   plus custom file-type support.
-- 💿 **PS4 PKG manager** — sort by Games / Updates / DLC, view cover art and metadata,
+- 💿 **PKG manager** — sort by Games / Updates / DLC, view cover art and metadata,
   bulk-rename, export to Excel, and remote-install.
 - 🗜️ **PS5 PFS compressor** — batch compression with pre-flight size estimates,
-  auto block-sizing, and compression ratings.
+  auto block-sizing, compression ratings, and **Compress All or Compress Selected**.
 - 🎨 **Modern dark theme** — a single, carefully tuned palette that's consistent across
   every window, table and dialog.
 - 💾 **Persistent settings** — IPs, ports and folder paths are remembered between launches.
@@ -167,7 +169,7 @@ PyInstaller does not cross-compile — build the Windows `.exe` on Windows and t
 
 1. **Launch** PlayStation Studio.
 2. Switch tools from the **View** menu (or `Ctrl/Cmd + 1…4`):
-   - `1` PS4 PKG Manager · `2` PS5 PFS Compressor · `3` Payload Sender · `4` FTP Client.
+   - `1` PKG Manager · `2` PS5 PFS Compressor · `3` Payload Sender · `4` FTP Client.
 3. Open the **FTP Client** tab.
 4. Click **Site Manager… → 🔍 Detect PS4 / PS5…** to scan your network, or **Add** a
    site manually.
@@ -365,7 +367,7 @@ PlayStation Studio provides fast filtering and locate-as-you-type across its fil
 - **Type-ahead search (FTP & payload lists):** with a file list focused, start typing a
   name to jump straight to the first matching row — the standard, keyboard-driven way to
   locate a file in a long directory.
-- **Live filter (PS4 PKG Manager):** the **Filter the current list…** box instantly narrows
+- **Live filter (PKG Manager):** the **Filter the current list…** box instantly narrows
   the package list as you type, across the Games / Updates / DLC tabs.
 
 ![Search / filter the PKG library](docs/screenshots/ps4-pkg-manager.png)
@@ -424,7 +426,7 @@ stylesheet (`playstation_studio/shared/theme.py`).
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl/Cmd + 1` | Switch to **PS4 PKG Manager** |
+| `Ctrl/Cmd + 1` | Switch to **PKG Manager** |
 | `Ctrl/Cmd + 2` | Switch to **PS5 PFS Compressor** |
 | `Ctrl/Cmd + 3` | Switch to **Payload Sender** |
 | `Ctrl/Cmd + 4` | Switch to **FTP Client** |
@@ -501,14 +503,15 @@ The first official public release of PlayStation Studio.
 - Per-payload status, quick port presets, and console auto-detect.
 - Improved socket timeout handling and connection reliability.
 
-**PS4 PKG Manager**
+**PKG Manager**
 - Scan folders of `.pkg` files, sorted into Games / Updates / DLC from `param.sfo`.
 - Cover art, full metadata, live filter, bulk rename by template, and Excel export.
-- Remote install to PS4 (Remote PKG Installer) and PS5 (etaHEN DPI v1/v2) with progress
-  and HTTP Range support.
+- Remote install via the Remote PKG Installer (PS4) and etaHEN DPI v1/v2 (PS5) with
+  progress and HTTP Range support.
 
 **PS5 PFS Compressor**
 - Batch compression via the bundled MkPFS engine with per-game progress and ratings.
+- **Compress All** or **Compress Selected** — pack the whole list or just the games you pick.
 - Pre-flight size estimate, auto block-sizing for small-file games, and a history viewer.
 - Configurable temp folder and slow-source (network / iCloud) warnings.
 

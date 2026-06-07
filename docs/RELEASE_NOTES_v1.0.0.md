@@ -3,7 +3,7 @@
 **Initial Release** · 2026-06-07
 
 PlayStation Studio is an all-in-one desktop toolkit for PS4 / PS5 homebrew, combining a
-dual-pane FTP client, a network payload sender, a PS4 PKG library manager, and a PS5 PFS
+dual-pane FTP client, a network payload sender, a PKG library manager, and a PS5 PFS
 compressor in one modern, dark-themed window. Built with Python and PySide6, it ships as a
 standalone app for Windows and macOS — no Python install required.
 
@@ -17,7 +17,7 @@ standalone app for Windows and macOS — no Python install required.
   as a ready-to-connect FTP site automatically.
 - **Payload sender** for `.elf` / `.bin` / `.jar` and more, with batch sending and
   per-file status.
-- **PS4 PKG manager** with metadata, cover art, bulk rename, Excel export and remote
+- **PKG manager** with metadata, cover art, bulk rename, Excel export and remote
   install.
 - **PS5 PFS compressor** with pre-flight size estimates, auto block-sizing and a history
   viewer.
@@ -45,14 +45,15 @@ standalone app for Windows and macOS — no Python install required.
 - Add files, drag & drop, or recursively scan a folder; send one, selected, or all.
 - Per-payload status, quick port presets, and console auto-detect.
 
-### PS4 PKG Manager
+### PKG Manager
 - Scan folders of `.pkg` files, sorted into Games / Updates / DLC from `param.sfo`.
 - Cover art, full metadata, live filter, bulk rename by template, Excel export.
-- Remote install to PS4 (Remote PKG Installer) and PS5 (etaHEN DPI v1/v2), with progress
-  and HTTP Range support for resumable console downloads.
+- Remote install via the Remote PKG Installer (PS4) and etaHEN DPI v1/v2 (PS5), with
+  progress and HTTP Range support for resumable console downloads.
 
 ### PS5 PFS Compressor
 - Batch compression via the bundled MkPFS engine, with per-game progress and ratings.
+- **Compress All** or **Compress Selected** — pack the whole queue or just the picked games.
 - Pre-flight size estimate, auto block-sizing for small-file games, persistent history.
 - Configurable temp folder; warnings for slow sources (network shares, iCloud).
 

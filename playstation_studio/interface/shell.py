@@ -26,7 +26,7 @@ class MainWindow(QMainWindow):
     """Top-level window. Menu bar + tab bar drive navigation."""
 
     TABS = [
-        ("ps4", "PS4  ·  PKG Manager", "PS4 PKG Manager"),
+        ("ps4", "PKG Manager", "PKG Manager"),
         ("ps5", "PS5  ·  PFS Compressor", "PS5 PFS Compressor"),
         ("payload", "Payloads", "Payload Sender"),
         ("ftp", "FTP Client", "FTP Client"),
@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
             f"<p>Version {APP_VERSION}</p>"
             "<p>An all-in-one toolkit:</p>"
             "<ul>"
-            "<li><b>PS4 PKG Manager</b> — browse, rename, export, remote-install</li>"
+            "<li><b>PKG Manager</b> — browse, rename, export, remote-install</li>"
             "<li><b>PS5 PFS Compressor</b> — batch game-dump compression</li>"
             "<li><b>Payload Sender</b> — send ELF/BIN/JAR over TCP</li>"
             "<li><b>FTP Client</b> — dual-pane transfers</li>"

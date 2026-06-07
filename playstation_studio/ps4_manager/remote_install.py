@@ -36,7 +36,7 @@ METHOD_PS5_DPI_V2 = "ps5_dpi_v2"
 METHOD_PS5_DPI_V1 = "ps5_dpi_v1"
 
 INSTALL_METHODS = [
-    (METHOD_PS4_RPI, "PS4 · Remote PKG Installer (:12800)"),
+    (METHOD_PS4_RPI, "Remote PKG Installer (:12800)"),
     (METHOD_PS5_DPI_V2, "PS5 · etaHEN DPI v2 (:12800)"),
     (METHOD_PS5_DPI_V1, "PS5 · etaHEN DPI v1 (:9090)"),
 ]
@@ -217,7 +217,7 @@ class TestConnectivity(QThread):
 
 
 class RemoteInstaller(QThread):
-    """Send packages to the PS4 Remote PKG Installer and track progress."""
+    """Send packages to the Remote PKG Installer and track progress."""
 
     log = Signal(str)
     progress = Signal(int, str, int)   # row index, time-remaining text, percent

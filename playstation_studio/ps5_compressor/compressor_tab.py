@@ -43,6 +43,7 @@ class Ps5CompressTab(QWidget):
         super().__init__(parent)
         self.jobs: list[Job] = []
         self.bars: list[QProgressBar] = []
+        self._active_indices: list[int] | None = None   # jobs in the current run
         self.estimates: dict[str, Estimate] = {}    # by source_dir
         self._estimator: EstimatorThread | None = None
         self.runner = BatchRunner(self)
@@ -335,10 +336,14 @@ class Ps5CompressTab(QWidget):
         self.btn_stop.setObjectName("Danger")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.on_stop)
+        self.btn_start_sel = QPushButton("▶  Compress Selected")
+        self.btn_start_sel.setToolTip("Compress only the selected game(s) in the list.")
+        self.btn_start_sel.clicked.connect(lambda: self.on_start(selected_only=True))
         self.btn_start = QPushButton("▶  Compress All")
         self.btn_start.setObjectName("Primary")
         self.btn_start.clicked.connect(self.on_start)
         lay.addWidget(self.btn_stop)
+        lay.addWidget(self.btn_start_sel)
         lay.addWidget(self.btn_start)
         return f
 
@@ -618,17 +623,28 @@ class Ps5CompressTab(QWidget):
             temp_path=self.temp_path.text().strip(),
         )
 
-    def on_start(self) -> None:
+    def on_start(self, selected_only: bool = False) -> None:
         if self.runner.running:
             return
         if not self.jobs:
             QMessageBox.information(self, "Nothing to do", "Add at least one game first.")
             return
+        # Decide which jobs to run: the whole list, or just the selected rows.
+        if selected_only:
+            run_indices = sorted({i.row() for i in self.table.selectedIndexes()
+                                  if 0 <= i.row() < len(self.jobs)})
+            if not run_indices:
+                QMessageBox.information(self, "Nothing selected",
+                                       "Select one or more games in the list first.")
+                return
+        else:
+            run_indices = list(range(len(self.jobs)))
+        run_jobs = [self.jobs[i] for i in run_indices]
         # Warn if any source lives in iCloud (Desktop & Documents sync / iCloud
         # Drive): macOS downloads files on demand and evicts them under disk
         # pressure, so packing crawls or fails. This is the #1 cause of a
         # compression that looks hung on a Mac.
-        cloud_jobs = [j for j in self.jobs if is_cloud_synced_path(j.source_dir)]
+        cloud_jobs = [j for j in run_jobs if is_cloud_synced_path(j.source_dir)]
         if cloud_jobs:
             names = "\n".join(f"  • {j.name}" for j in cloud_jobs[:6])
             more = f"\n  …and {len(cloud_jobs) - 6} more" if len(cloud_jobs) > 6 else ""
@@ -646,7 +662,7 @@ class Ps5CompressTab(QWidget):
                 return
         # Warn if any source lives on a slow network share (SMB/NFS): reading
         # thousands of game files over the network is very slow and looks frozen.
-        net_jobs = [j for j in self.jobs
+        net_jobs = [j for j in run_jobs
                     if is_network_path(j.source_dir)
                     and not is_cloud_synced_path(j.source_dir)]
         if net_jobs:
@@ -664,27 +680,30 @@ class Ps5CompressTab(QWidget):
                 return
         # Storage pre-flight: packing needs room for the image *and* temp spool
         # (~2.2x the source). Warn early if the output or temp disk is short.
-        if not self._storage_preflight():
+        if not self._storage_preflight(run_jobs):
             return
-        # reset transient state
-        for j in self.jobs:
+        # reset transient state (only for the jobs we're about to run)
+        for j in run_jobs:
             if j.status != Status.DONE or self.cb_overwrite.isChecked():
                 j.status = Status.QUEUED
                 j.progress = 0
                 j.phase = ""
                 j.size_out = 0
                 j.output_path = ""
+        self._active_indices = run_indices
         self._rebuild_table()
         self.overall.setValue(0)
         self._set_running_ui(True)
-        self._log("=" * 50 + "\nStarting batch…\n")
-        self.runner.start(self.jobs, self._collect_settings())
+        scope = (f"{len(run_indices)} selected game(s)" if selected_only
+                 else "batch")
+        self._log("=" * 50 + f"\nStarting {scope}…\n")
+        self.runner.start(self.jobs, self._collect_settings(), indices=run_indices)
 
-    def _total_source_bytes(self) -> int | None:
+    def _total_source_bytes(self, jobs: list[Job]) -> int | None:
         """Best-effort total source size. Uses estimates; falls back to a quick
         local walk. Returns None when it can't be determined cheaply."""
         total = 0
-        for j in self.jobs:
+        for j in jobs:
             est = self._est(j)
             if est:
                 total += est.raw
@@ -698,15 +717,15 @@ class Ps5CompressTab(QWidget):
                     if os.path.exists(os.path.join(r, f)))
         return total
 
-    def _storage_preflight(self) -> bool:
+    def _storage_preflight(self, jobs: list[Job]) -> bool:
         """Warn (and let the user cancel) when disk space looks insufficient."""
-        total = self._total_source_bytes()
+        total = self._total_source_bytes(jobs)
         if not total:
             return True
         out_dir = (self.out_dir.text().strip()
-                   or str(Path(self.jobs[0].source_dir).parent))
+                   or str(Path(jobs[0].source_dir).parent))
         temp_dir = str(resolve_temp_dir(
-            self.jobs[0].source_dir, self.temp_mode.currentData() or TEMP_MODE_APP,
+            jobs[0].source_dir, self.temp_mode.currentData() or TEMP_MODE_APP,
             self.temp_path.text().strip()))
         out_free = free_space_bytes(out_dir)
         temp_free = free_space_bytes(temp_dir)
@@ -734,6 +753,7 @@ class Ps5CompressTab(QWidget):
 
     def _set_running_ui(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
+        self.btn_start_sel.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         for w in (self.btn_scan, self.btn_add, self.btn_remove, self.btn_clear,
                   self.btn_estimate):
@@ -822,6 +842,7 @@ class Ps5CompressTab(QWidget):
     def _on_batch_finished(self, done: int, failed: int) -> None:
         self._set_running_ui(False)
         self.overall.setValue(100)
+        self._active_indices = None
         skipped = sum(1 for j in self.jobs if j.status == Status.SKIPPED)
         msg = f"Finished — {done} done"
         if skipped:
@@ -876,11 +897,19 @@ class Ps5CompressTab(QWidget):
     def _update_overall(self) -> None:
         if not self.jobs:
             return
+        # Only count the jobs in the current run (all of them for "Compress All",
+        # or just the picked rows for "Compress Selected") so the bar can reach
+        # 100%.
+        idxs = (self._active_indices if self._active_indices is not None
+                else range(len(self.jobs)))
+        run = [self.jobs[i] for i in idxs if 0 <= i < len(self.jobs)]
+        if not run:
+            return
         # Weight each game's progress by its size so the bar tracks real work,
         # not "1 of N games" (a 30 GB game ≠ a 200 MB one).
         weights = [max(j.size_in or (self._est(j).raw if self._est(j) else 0), 1)
-                   for j in self.jobs]
-        done = sum(j.progress * w for j, w in zip(self.jobs, weights))
+                   for j in run]
+        done = sum(j.progress * w for j, w in zip(run, weights))
         self.overall.setValue(int(done / sum(weights)))
 
     # ---------------------------------------------------------------- misc
