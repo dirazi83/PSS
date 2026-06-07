@@ -46,14 +46,20 @@ A modern PySide6 desktop app that combines two tools in one window:
 - Set the **console IP + port** (quick presets for common loader ports), with
   **Auto-Detect** to find the console on your LAN.
 
-### FTP Client  *(Phase 1)*
+### FTP Client
 - Connect to any **FTP** server — host/port, passive/active, anonymous login.
-- **Dual-pane** local ⇄ remote browser with up/refresh and folder navigation.
-- **Upload / download** with a live **transfer queue** (progress, speed, status).
-- **Site Manager** — save sites (host, port, creds, folders, notes, favorites);
-  passwords go to the OS keyring when `keyring` is installed.
-- Roadmap: sync, scheduler, search, preview, bookmarks, history, bandwidth
-  limiting, multi-threaded transfers.
+- **Dual-pane** local ⇄ remote browser with **back / forward / up** history, a
+  path bar, **multi-selection** and **right-click context menus**.
+- Full file management: **upload & download of files *and* folders** (recursive),
+  **New Folder**, **Rename**, **Delete**, and real-time **Refresh**.
+- **Transfer manager** — a queue with per-item progress, speed and **ETA**, plus
+  **Cancel / Retry / Clear / Pause-Resume**. Folders expand into one aggregate
+  job over the single control connection (reliable on console FTP servers).
+- **Site Manager** with **Detect PS4 / PS5** — scans the LAN (Sony DDP + a TCP
+  sweep), probes console FTP ports (1337 / 2121 / 21) and adds found consoles as
+  ready-to-connect sites. Passwords go to the OS keyring when `keyring` is set.
+- **Advanced mode** unlocks power tools: a **raw FTP command** bar,
+  **permissions (chmod)**, **hidden files**, and **recursive delete**.
 
 ### Persistent settings
 - All IP addresses, ports and folder paths are saved to

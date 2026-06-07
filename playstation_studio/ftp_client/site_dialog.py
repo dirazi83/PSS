@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from .ftp_detect import FtpDetectDialog, ftp_port_for
 from .sites import HAVE_KEYRING, Site, SiteManager
 
 
@@ -23,6 +24,11 @@ class SiteManagerDialog(QDialog):
 
         # left: list + list buttons
         left = QVBoxLayout()
+        self.btn_detect = QPushButton("🔍  Detect PS4 / PS5…")
+        self.btn_detect.setToolTip("Scan the network for consoles running an "
+                                   "FTP server and add them as sites.")
+        self.btn_detect.clicked.connect(self.on_detect)
+        left.addWidget(self.btn_detect)
         self.list = QListWidget()
         self.list.currentRowChanged.connect(self._on_select)
         left.addWidget(self.list, stretch=1)
@@ -152,6 +158,26 @@ class SiteManagerDialog(QDialog):
     # ---- actions ----
     def on_add(self) -> None:
         self.manager.add(Site())
+        self._reload_list(len(self.manager.sites) - 1)
+
+    def on_detect(self) -> None:
+        dlg = FtpDetectDialog(self)
+        if not dlg.exec() or not dlg.chosen:
+            return
+        added = 0
+        for console in dlg.chosen:
+            ctype = console.get("type", "Console")
+            cname = console.get("name", "")
+            ip = console.get("ip", "")
+            port = ftp_port_for(console) or 1337
+            site = Site(
+                name=f"{ctype} {ip}" if not cname else f"{ctype} · {cname}",
+                host=ip, port=port,
+                anonymous=True,        # console FTP servers usually need no login
+                passive=True, remote_dir="/",
+                notes=f"Auto-detected ({console.get('source', 'scan')}).")
+            self.manager.add(site)
+            added += 1
         self._reload_list(len(self.manager.sites) - 1)
 
     def on_dup(self) -> None:
