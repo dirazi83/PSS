@@ -17,6 +17,11 @@ SVG_DIR = os.path.join(HERE, "svg")
 ICON_DIR = os.path.join(HERE, "icons")
 SIZES = [16, 24, 32, 48, 64, 128, 256, 512, 1024]
 
+# Optional raster source for the *app* icon. When present, the app icon is
+# rendered from this image instead of the generated SVG (the SVG stays as a
+# fallback). Drop a square-ish PNG here to brand the app with custom artwork.
+SOURCE_ICON = os.path.join(HERE, "source_icon.png")
+
 # Per-icon hue (top → bottom gradient). Shared squircle + white glyph keep the
 # set cohesive; the hue makes each tab instantly distinguishable.
 PALETTE = {
@@ -180,6 +185,30 @@ def render_pngs(svgs: dict[str, str]) -> int:
     return count
 
 
+def render_app_raster() -> int:
+    """Render the app_*.png set from SOURCE_ICON (overwrites the SVG-rendered
+    app icons). The source is centered on a square canvas (padded with its
+    corner color, typically black) so non-square art isn't distorted.
+    """
+    from PIL import Image
+
+    os.makedirs(ICON_DIR, exist_ok=True)
+    img = Image.open(SOURCE_ICON).convert("RGBA")
+    w, h = img.size
+    side = max(w, h)
+    bg = img.getpixel((0, 0))            # match the artwork's background corner
+    if len(bg) == 3:
+        bg = bg + (255,)
+    canvas = Image.new("RGBA", (side, side), bg)
+    canvas.paste(img, ((side - w) // 2, (side - h) // 2), img)
+    count = 0
+    for size in SIZES:
+        canvas.resize((size, size), Image.LANCZOS).save(
+            os.path.join(ICON_DIR, f"app_{size}.png"))
+        count += 1
+    return count
+
+
 def write_app_ico() -> bool:
     """Write a multi-size Windows app.ico from the rendered app PNGs.
 
@@ -241,9 +270,14 @@ def write_app_icns() -> bool:
 def main() -> None:
     svgs = build_svgs()
     n = render_pngs(svgs)
+    raster = ""
+    if os.path.isfile(SOURCE_ICON):
+        render_app_raster()              # app icon from the bundled raster source
+        raster = "app icon from source_icon.png, "
     ico = "app.ico, " if write_app_ico() else ""
     icns = "app.icns, " if write_app_icns() else ""
-    print(f"Wrote {len(svgs)} SVGs, {n} PNGs, {ico}{icns}to {os.path.relpath(HERE)}")
+    print(f"Wrote {len(svgs)} SVGs, {n} PNGs, {raster}{ico}{icns}"
+          f"to {os.path.relpath(HERE)}")
 
 
 if __name__ == "__main__":
