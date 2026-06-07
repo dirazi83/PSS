@@ -26,13 +26,25 @@ A modern PySide6 desktop app that combines two tools in one window:
 
 ### PS5 PFS Compressor
 - **Recursive Scan Folder** with adjustable depth, plus drag & drop.
+- **Game cover + real title** read from each dump's `sce_sys/`.
 - **Batch queue** with per-game progress, size in/out and space saved.
+- **Auto block size** — games with thousands of tiny files (Minecraft, etc.)
+  otherwise pack *larger* than the source because each file is padded to a
+  64 KiB block; auto-fit picks the block size that minimises that padding.
+- **Configurable temp folder** — keep the compressor's intermediate data in the
+  app folder, beside the game, or on a fast/empty disk you pick.
+- **Slow-source warnings** — flags games on **network shares** or in **iCloud**
+  (Desktop & Documents sync), the top causes of a pack that looks frozen.
 - **All the knobs** — compression level, CPU cores, verify, AES-XTS, etc.
 
 ### Payload Sender
-- Send **`.elf` / `.bin` / `.jar`** payloads to a **PS4 or PS5** over TCP.
-- Set the **console IP + port** (with quick presets for common loader ports),
-  add a payload list (drag & drop too), and **Send**.
+- Send PS4/PS5 payloads (**`.elf` `.bin` `.jar` `.self` `.prx` `.sprx`** + your
+  own **custom** extensions) to a console over TCP.
+- **Scan Folder** recursively finds every payload; add files or drag & drop
+  (files *or* whole folders) too.
+- **Send one, selected, or all** with a live **per-payload status** column.
+- Set the **console IP + port** (quick presets for common loader ports), with
+  **Auto-Detect** to find the console on your LAN.
 
 ### FTP Client  *(Phase 1)*
 - Connect to any **FTP** server — host/port, passive/active, anonymous login.
@@ -46,6 +58,9 @@ A modern PySide6 desktop app that combines two tools in one window:
 ### Persistent settings
 - All IP addresses, ports and folder paths are saved to
   `~/.playstation_studio/config.json` and restored on the next launch.
+- On first launch the app creates working folders under
+  `~/.playstation_studio/`: **`payloads/`**, **`host/`** and **`temp/`** (the
+  compressor's default scratch space; configurable in the PS5 tab).
 
 ## Quick start
 
@@ -128,6 +143,8 @@ playstation_studio/
     theme.py             #   color palette + Qt stylesheet
     formatting.py        #   human-readable size helpers
     config.py            #   JSON settings store (IPs, ports, paths)
+    paths.py             #   working folders (payloads/host/temp) + temp policy
+    diskutil.py          #   network-mount + iCloud-eviction detection
     assets.py            #   icon loaders (QIcon / QPixmap)
   assets/                # bundled icon set
     build_icons.py       #   regenerates the SVGs + PNGs

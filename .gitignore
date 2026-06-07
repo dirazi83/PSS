@@ -24,3 +24,10 @@ Thumbs.db
 
 # Local agent/editor config
 .claude/
+
+# game dumps & pack artifacts (never commit)
+/Minecraft/
+*.ffpfs
+*.ffpfsc
+.pss_tmp/
+.DS_Store

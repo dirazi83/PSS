@@ -81,3 +81,61 @@ def is_network_path(path: str) -> bool:
     if sys.platform.startswith("win"):
         return _windows_is_remote(real)
     return (_posix_mount_fstype(real) or "").lower() in NETWORK_FSTYPES
+
+
+# macOS "dataless" (evicted to iCloud) file flag. A file with this flag has no
+# local data, reading it forces an on-demand download.
+_SF_DATALESS = 0x40000000
+
+
+def _icloud_desktop_documents_enabled() -> bool:
+    """True when macOS 'Desktop & Documents' iCloud sync appears enabled."""
+    base = (os.path.expanduser("~") +
+            "/Library/Mobile Documents/com~apple~CloudDocs")
+    return os.path.isdir(base + "/Desktop") or os.path.isdir(base + "/Documents")
+
+
+def is_cloud_synced_path(path: str) -> bool:
+    """True if *path* lives in an iCloud-synced location (macOS).
+
+    Covers iCloud Drive itself and the 'Desktop & Documents' sync feature, where
+    files are downloaded on demand and can be evicted under disk pressure, making
+    bulk reads extremely slow or causing them to fail outright.
+    """
+    if not sys.platform == "darwin":
+        return False
+    try:
+        real = os.path.realpath(path)
+    except OSError:
+        real = path
+    if "/Library/Mobile Documents/" in real or "com~apple~CloudDocs" in real:
+        return True
+    if _icloud_desktop_documents_enabled():
+        home = os.path.realpath(os.path.expanduser("~"))
+        for sub in ("Desktop", "Documents"):
+            d = os.path.join(home, sub)
+            if real == d or real.startswith(d + os.sep):
+                return True
+    return False
+
+
+def count_dataless_files(path: str, sample_limit: int = 4000) -> int:
+    """Count iCloud-evicted (dataless) files under *path*, sampling up to a cap.
+
+    Returns the number of dataless files found in the first *sample_limit* files.
+    Uses ``lstat`` so it never triggers a download just to check.
+    """
+    found = 0
+    checked = 0
+    for dirpath, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                st = os.lstat(os.path.join(dirpath, f))
+                if getattr(st, "st_flags", 0) & _SF_DATALESS:
+                    found += 1
+            except OSError:
+                pass
+            checked += 1
+            if checked >= sample_limit:
+                return found
+    return found

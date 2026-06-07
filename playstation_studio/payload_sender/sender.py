@@ -12,6 +12,8 @@ import socket
 
 from PySide6.QtCore import QThread, Signal
 
+from ..shared.config import config
+
 # Common loader ports, shown as quick presets in the UI.
 PORT_PRESETS = [
     ("PS5 · ELF/BIN (9021)", 9021),
@@ -20,8 +22,57 @@ PORT_PRESETS = [
     ("JAR loader (9025)", 9025),
 ]
 
-SUPPORTED_EXTS = (".elf", ".bin", ".jar")
+# Built-in PS4/PS5 payload file types. The user can extend this with custom
+# extensions in the Payload Sender (saved to config).
+DEFAULT_EXTS = (".elf", ".bin", ".jar", ".self", ".prx", ".sprx")
+SUPPORTED_EXTS = DEFAULT_EXTS  # kept for backward-compatibility
+
 _CHUNK = 64 * 1024
+
+
+def custom_exts() -> tuple[str, ...]:
+    """Extra payload extensions the user added, normalised to ``.ext`` form."""
+    raw = config.get("payloads", "custom_exts", "") or ""
+    out: list[str] = []
+    for tok in raw.replace(",", " ").split():
+        tok = tok.strip().lower()
+        if not tok:
+            continue
+        if not tok.startswith("."):
+            tok = "." + tok
+        if tok not in out:
+            out.append(tok)
+    return tuple(out)
+
+
+def effective_exts() -> tuple[str, ...]:
+    """All payload extensions currently recognised (built-in + custom)."""
+    return tuple(dict.fromkeys(DEFAULT_EXTS + custom_exts()))
+
+
+def is_payload(path: str) -> bool:
+    """True when *path* is a file with a recognised payload extension."""
+    return (os.path.isfile(path)
+            and os.path.splitext(path)[1].lower() in effective_exts())
+
+
+def scan_payloads(folder: str, max_depth: int = 6) -> list[str]:
+    """Recursively find payload files under *folder*, down to *max_depth*.
+
+    Returns a sorted list of absolute file paths.
+    """
+    root = os.path.abspath(folder)
+    exts = effective_exts()
+    found: list[str] = []
+    base_depth = root.rstrip(os.sep).count(os.sep)
+    for dirpath, dirnames, filenames in os.walk(root):
+        depth = dirpath.rstrip(os.sep).count(os.sep) - base_depth
+        if depth >= max_depth:
+            dirnames[:] = []          # stop descending past the limit
+        for fn in filenames:
+            if os.path.splitext(fn)[1].lower() in exts:
+                found.append(os.path.join(dirpath, fn))
+    return sorted(found)
 
 
 class PayloadSender(QThread):

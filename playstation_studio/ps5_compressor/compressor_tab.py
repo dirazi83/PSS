@@ -9,7 +9,7 @@ from PySide6.QtGui import (
     QColor, QDragEnterEvent, QDropEvent, QIcon, QTextCursor,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QFileDialog, QFrame,
+    QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListView, QMessageBox,
     QPlainTextEdit, QProgressBar, QPushButton, QSlider, QSpinBox,
     QStackedWidget, QTableWidget, QTableWidgetItem, QTreeView,
@@ -19,7 +19,11 @@ from PySide6.QtWidgets import (
 from .jobs import Job, PackSettings, Status, find_game_dirs
 from .runner import BatchRunner
 from ..shared.config import config
-from ..shared.diskutil import is_network_path
+from ..shared.diskutil import is_cloud_synced_path, is_network_path
+from ..shared.paths import (
+    TEMP_MODE_APP, TEMP_MODE_CUSTOM, TEMP_MODE_GAME, set_temp_policy,
+    temp_mode as get_temp_mode, custom_temp_path,
+)
 from ..shared.theme import Palette
 from ..shared.formatting import human_size
 
@@ -220,7 +224,44 @@ class Ps5CompressTab(QWidget):
         self.cpu.setValue(0)
         lay.addWidget(self.cpu)
 
+        # temp folder policy
+        lay.addWidget(self._field_label("Temp files (intermediate data)"))
+        self.temp_mode = QComboBox()
+        self.temp_mode.addItem("App folder (default)", TEMP_MODE_APP)
+        self.temp_mode.addItem("Beside the game", TEMP_MODE_GAME)
+        self.temp_mode.addItem("Custom folder…", TEMP_MODE_CUSTOM)
+        self.temp_mode.setToolTip(
+            "Where the compressor writes intermediate data while packing.\n"
+            "• App folder — ~/.playstation_studio/temp\n"
+            "• Beside the game — same disk as the source (fast for local games)\n"
+            "• Custom folder — put it on a fast, empty disk")
+        idx = self.temp_mode.findData(get_temp_mode())
+        self.temp_mode.setCurrentIndex(idx if idx >= 0 else 0)
+        self.temp_mode.currentIndexChanged.connect(self._on_temp_mode_changed)
+        lay.addWidget(self.temp_mode)
+
+        temp_row = QHBoxLayout()
+        temp_row.setSpacing(6)
+        self.temp_path = QLineEdit(custom_temp_path())
+        self.temp_path.setPlaceholderText("Pick a custom temp folder")
+        self.temp_path.editingFinished.connect(self._save_temp_policy)
+        self.btn_temp = QPushButton("…")
+        self.btn_temp.setFixedWidth(40)
+        self.btn_temp.clicked.connect(self.on_pick_temp)
+        temp_row.addWidget(self.temp_path)
+        temp_row.addWidget(self.btn_temp)
+        lay.addLayout(temp_row)
+        self._sync_temp_row()
+
         # toggles
+        self.cb_autoblock = QCheckBox("Shrink small-file games (auto block size)")
+        self.cb_autoblock.setToolTip(
+            "Pick the block size that minimises per-file padding. Games with "
+            "thousands of tiny files (e.g. Minecraft) can otherwise pack LARGER "
+            "than the original because each file is padded to a 64 KiB block.")
+        self.cb_autoblock.setChecked(bool(config.get(CFG, "auto_block_size", True)))
+        self.cb_autoblock.toggled.connect(
+            lambda on: config.set(CFG, "auto_block_size", on))
         self.cb_skipexec = QCheckBox("Store executables uncompressed")
         self.cb_skipexec.setChecked(True)
         self.cb_verify = QCheckBox("Verify after packing")
@@ -233,8 +274,9 @@ class Ps5CompressTab(QWidget):
         self.cb_lowmem.toggled.connect(
             lambda on: config.set(CFG, "low_memory", on))
         self.cb_overwrite = QCheckBox("Overwrite existing images")
-        for cb in (self.cb_skipexec, self.cb_verify, self.cb_encrypt,
-                   self.cb_require, self.cb_lowmem, self.cb_overwrite):
+        for cb in (self.cb_autoblock, self.cb_skipexec, self.cb_verify,
+                   self.cb_encrypt, self.cb_require, self.cb_lowmem,
+                   self.cb_overwrite):
             lay.addWidget(cb)
 
         lay.addStretch(1)
@@ -409,6 +451,27 @@ class Ps5CompressTab(QWidget):
             self.out_dir.setText(d)
             config.set(CFG, "output_dir", d)
 
+    # --------------------------------------------------------- temp folder
+    def _sync_temp_row(self) -> None:
+        """Show the custom-path row only when 'Custom folder' is selected."""
+        is_custom = self.temp_mode.currentData() == TEMP_MODE_CUSTOM
+        self.temp_path.setVisible(is_custom)
+        self.btn_temp.setVisible(is_custom)
+
+    def _on_temp_mode_changed(self, _index: int) -> None:
+        self._sync_temp_row()
+        self._save_temp_policy()
+
+    def _save_temp_policy(self) -> None:
+        set_temp_policy(self.temp_mode.currentData() or TEMP_MODE_APP,
+                        self.temp_path.text().strip())
+
+    def on_pick_temp(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Choose temp folder")
+        if d:
+            self.temp_path.setText(d)
+            self._save_temp_policy()
+
     # --------------------------------------------------------- run control
     def _collect_settings(self) -> PackSettings:
         return PackSettings(
@@ -423,6 +486,9 @@ class Ps5CompressTab(QWidget):
             cpu_count=self.cpu.value(),
             low_memory=self.cb_lowmem.isChecked(),
             overwrite=self.cb_overwrite.isChecked(),
+            auto_block_size=self.cb_autoblock.isChecked(),
+            temp_mode=self.temp_mode.currentData() or TEMP_MODE_APP,
+            temp_path=self.temp_path.text().strip(),
         )
 
     def on_start(self) -> None:
@@ -431,9 +497,31 @@ class Ps5CompressTab(QWidget):
         if not self.jobs:
             QMessageBox.information(self, "Nothing to do", "Add at least one game first.")
             return
+        # Warn if any source lives in iCloud (Desktop & Documents sync / iCloud
+        # Drive): macOS downloads files on demand and evicts them under disk
+        # pressure, so packing crawls or fails. This is the #1 cause of a
+        # compression that looks hung on a Mac.
+        cloud_jobs = [j for j in self.jobs if is_cloud_synced_path(j.source_dir)]
+        if cloud_jobs:
+            names = "\n".join(f"  • {j.name}" for j in cloud_jobs[:6])
+            more = f"\n  …and {len(cloud_jobs) - 6} more" if len(cloud_jobs) > 6 else ""
+            choice = QMessageBox.warning(
+                self, "Game is in an iCloud folder",
+                f"{len(cloud_jobs)} game(s) are inside iCloud "
+                f"(Desktop/Documents sync or iCloud Drive):\n{names}{more}\n\n"
+                "macOS downloads these files on demand and can evict them when "
+                "the disk is low, so compression becomes extremely slow and may "
+                "fail partway (files disappear mid-pack).\n\nMove the game to a "
+                "plain local folder outside Desktop/Documents (e.g. "
+                "~/Games) first.\n\nTry to compress from iCloud anyway?",
+                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+            if choice != QMessageBox.Yes:
+                return
         # Warn if any source lives on a slow network share (SMB/NFS): reading
         # thousands of game files over the network is very slow and looks frozen.
-        net_jobs = [j for j in self.jobs if is_network_path(j.source_dir)]
+        net_jobs = [j for j in self.jobs
+                    if is_network_path(j.source_dir)
+                    and not is_cloud_synced_path(j.source_dir)]
         if net_jobs:
             names = "\n".join(f"  • {j.name}" for j in net_jobs[:6])
             more = f"\n  …and {len(net_jobs) - 6} more" if len(net_jobs) > 6 else ""

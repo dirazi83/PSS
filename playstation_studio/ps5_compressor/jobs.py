@@ -116,6 +116,9 @@ class PackSettings:
     cpu_count: int = 0              # 0 = auto/all
     low_memory: bool = False        # cap to 1 worker to minimise peak RAM
     overwrite: bool = False         # re-pack even if output exists
+    auto_block_size: bool = True    # pick block size that minimises padding
+    temp_mode: str = "app"          # app | custom | game (see shared.paths)
+    temp_path: str = ""             # custom temp folder when temp_mode == custom
 
 
 @dataclass
@@ -195,6 +198,17 @@ class Job:
             cmd += ["--compression-level", str(settings.compression_level)]
         if settings.skip_executable_compression:
             cmd += ["--skip-executable-compression"]
+        # Games with many tiny files waste huge space padding each one up to the
+        # 64 KiB block; "auto-fit" picks the block size that minimises that
+        # padding so the image doesn't end up larger than the source.
+        if settings.auto_block_size:
+            cmd += ["--block-size", "auto-fit"]
+        # Direct intermediate data to the chosen temp location (fast/empty disk
+        # or beside the game) instead of a possibly full/slow system temp.
+        from ..shared.paths import resolve_temp_dir
+        temp_dir = resolve_temp_dir(self.source_dir,
+                                    settings.temp_mode, settings.temp_path)
+        cmd += ["--temp-folder", str(temp_dir)]
         # Low-memory mode forces a single worker (one file at a time) to keep
         # peak RAM low; otherwise honour the requested cpu count (0 = auto).
         effective_cpu = 1 if settings.low_memory else settings.cpu_count

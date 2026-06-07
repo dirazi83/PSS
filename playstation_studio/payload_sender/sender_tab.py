@@ -1,11 +1,16 @@
-"""Payload Sender tab — pick .elf/.bin/.jar and send to a PS4/PS5 over TCP."""
+"""Payload Sender tab — find PS4/PS5 payloads and send them, singly or in bulk.
+
+Add files, drag & drop, or point Scan Folder at a directory to auto-detect every
+payload (.elf/.bin/.jar/.self/.prx/.sprx plus any custom types). Then send the
+selected payloads one by one, with a live status for each row.
+"""
 
 from __future__ import annotations
 
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
@@ -15,19 +20,34 @@ from PySide6.QtWidgets import (
 from ..shared.config import config
 from ..shared.detect_dialog import detect_console
 from ..shared.formatting import human_size
+from ..shared.paths import PAYLOADS_DIR
 from ..shared.theme import Palette
-from .sender import PORT_PRESETS, SUPPORTED_EXTS, PayloadSender
+from .sender import (
+    PORT_PRESETS, PayloadSender, custom_exts, effective_exts, is_payload,
+    scan_payloads,
+)
 
 CFG = "payloads"
 
+_OK = "#4ade80"
+_FAIL = "#f87171"
+_BUSY = "#fbbf24"
+
 
 class PayloadSenderTab(QWidget):
-    COLS = ["Payload", "Type", "Size"]
+    COLS = ["Payload", "Type", "Size", "Status"]
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.items: list[dict] = config.get(CFG, "items", []) or []
         self._sender: PayloadSender | None = None
+        self._queue: list[int] = []
+        self._current_row: int = -1
+        self._batch_total = 0
+        self._batch_done = 0
+        self._ip = ""
+        self._port = 0
+        self._status_by_path: dict[str, tuple[str, str]] = {}
         self.setAcceptDrops(True)
 
         body = QHBoxLayout(self)
@@ -45,16 +65,24 @@ class PayloadSenderTab(QWidget):
         bar = QHBoxLayout()
         bar.setSpacing(8)
         self.btn_add = QPushButton("＋  Add Payload(s)")
-        self.btn_add.setToolTip("Add .elf / .bin / .jar files.")
+        self.btn_add.setToolTip("Add individual payload files.")
+        self.btn_scan = QPushButton("⊕  Scan Folder")
+        self.btn_scan.setToolTip("Pick a folder and recursively find every "
+                                 "payload file beneath it.")
         self.btn_remove = QPushButton("－  Remove")
         self.btn_clear = QPushButton("Clear")
         self.btn_clear.setObjectName("Ghost")
         self.btn_add.clicked.connect(self.on_add)
+        self.btn_scan.clicked.connect(self.on_scan)
         self.btn_remove.clicked.connect(self.on_remove)
         self.btn_clear.clicked.connect(self.on_clear)
         bar.addWidget(self.btn_add)
+        bar.addWidget(self.btn_scan)
         bar.addWidget(self.btn_remove)
         bar.addStretch(1)
+        self.count_pill = QLabel("0 payloads")
+        self.count_pill.setObjectName("Pill")
+        bar.addWidget(self.count_pill)
         bar.addWidget(self.btn_clear)
         col.addLayout(bar)
 
@@ -62,16 +90,17 @@ class PayloadSenderTab(QWidget):
         self.table.setHorizontalHeaderLabels(self.COLS)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.itemDoubleClicked.connect(lambda *_: self.on_send())
+        self.table.itemDoubleClicked.connect(self._send_double_clicked)
         col.addWidget(self.table, stretch=3)
 
-        self.hint = QLabel("Drop .elf / .bin / .jar here, or use Add Payload(s).")
+        self.hint = QLabel("Drop payloads or a folder here, use Add Payload(s), "
+                           "or Scan Folder.")
         self.hint.setAlignment(Qt.AlignCenter)
         self.hint.setStyleSheet(f"color:{Palette.text_faint}; font-size:13px;")
         col.addWidget(self.hint)
@@ -129,11 +158,28 @@ class PayloadSenderTab(QWidget):
         self.preset.activated.connect(self._apply_preset)
         lay.addWidget(self.preset)
 
+        lay.addWidget(self._field_label("Custom file types (scan)"))
+        self.exts = QLineEdit(config.get(CFG, "custom_exts", ""))
+        self.exts.setPlaceholderText("e.g.  .out .mod  (space/comma separated)")
+        self.exts.setToolTip("Extra extensions that Scan Folder / drag & drop "
+                             "treat as payloads, on top of the built-in set:\n"
+                             + "  ".join(effective_exts()))
+        self.exts.editingFinished.connect(self._save_exts)
+        lay.addWidget(self.exts)
+
         lay.addSpacing(6)
-        self.btn_send = QPushButton("▶  Send to Console")
-        self.btn_send.setObjectName("Primary")
-        self.btn_send.clicked.connect(self.on_send)
-        lay.addWidget(self.btn_send)
+        self.btn_send_sel = QPushButton("▶  Send Selected")
+        self.btn_send_sel.setObjectName("Primary")
+        self.btn_send_sel.clicked.connect(self.on_send_selected)
+        lay.addWidget(self.btn_send_sel)
+        self.btn_send_all = QPushButton("Send All")
+        self.btn_send_all.clicked.connect(self.on_send_all)
+        lay.addWidget(self.btn_send_all)
+        self.btn_cancel = QPushButton("Stop")
+        self.btn_cancel.setObjectName("Danger")
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.clicked.connect(self.on_cancel)
+        lay.addWidget(self.btn_cancel)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -173,25 +219,50 @@ class PayloadSenderTab(QWidget):
         if port:
             self.port.setValue(int(port))
 
+    def _save_exts(self) -> None:
+        config.set(CFG, "custom_exts", self.exts.text().strip())
+        self.exts.setToolTip("Extra extensions that Scan Folder / drag & drop "
+                             "treat as payloads, on top of the built-in set:\n"
+                             + "  ".join(effective_exts()))
+
     # ================================================================ actions
     def on_add(self) -> None:
-        exts = " ".join(f"*{e}" for e in SUPPORTED_EXTS)
+        exts = " ".join(f"*{e}" for e in effective_exts())
+        start = PAYLOADS_DIR if PAYLOADS_DIR.exists() else ""
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select payload(s)", "", f"Payloads ({exts});;All files (*)")
-        added = 0
-        for p in paths:
-            if self._add_path(p):
-                added += 1
+            self, "Select payload(s)", str(start),
+            f"Payloads ({exts});;All files (*)")
+        added = sum(1 for p in paths if self._add_path(p))
         if added:
             self._persist()
             self._reload_table()
             self._log(f"Added {added} payload(s).")
 
+    def on_scan(self) -> None:
+        start = str(PAYLOADS_DIR) if PAYLOADS_DIR.exists() else ""
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select a folder to scan for payloads", start)
+        if not folder:
+            return
+        found = scan_payloads(folder)
+        added = sum(1 for p in found if self._add_path(p))
+        self._persist()
+        self._reload_table()
+        dupes = len(found) - added
+        msg = f"Scanned {folder}: found {len(found)} payload(s)"
+        if dupes:
+            msg += f", {added} new ({dupes} already listed)"
+        self._log(msg + ".")
+        if not found:
+            QMessageBox.information(
+                self, "No payloads found",
+                "No payload files were found under:\n\n" + folder +
+                "\n\nBuilt-in types: " + "  ".join(effective_exts()) +
+                "\nAdd more via 'Custom file types' on the right.")
+
     def _add_path(self, path: str) -> bool:
         path = os.path.abspath(path)
-        if not os.path.isfile(path):
-            return False
-        if os.path.splitext(path)[1].lower() not in SUPPORTED_EXTS:
+        if not is_payload(path):
             return False
         if any(os.path.abspath(i["path"]) == path for i in self.items):
             return False
@@ -199,19 +270,26 @@ class PayloadSenderTab(QWidget):
         return True
 
     def on_remove(self) -> None:
-        row = self.table.currentRow()
-        if 0 <= row < len(self.items):
-            del self.items[row]
-            self._persist()
-            self._reload_table()
+        rows = sorted({i.row() for i in self.table.selectedIndexes()},
+                      reverse=True)
+        if not rows:
+            return
+        for r in rows:
+            if 0 <= r < len(self.items):
+                del self.items[r]
+        self._persist()
+        self._reload_table()
 
     def on_clear(self) -> None:
         self.items.clear()
+        self._status_by_path.clear()
         self._persist()
         self._reload_table()
 
     def _persist(self) -> None:
-        config.set(CFG, "items", self.items)
+        # store only durable fields (name + path)
+        config.set(CFG, "items",
+                   [{"name": i["name"], "path": i["path"]} for i in self.items])
 
     def _reload_table(self) -> None:
         self.table.setRowCount(0)
@@ -230,35 +308,86 @@ class PayloadSenderTab(QWidget):
             self.table.setItem(r, 0, name)
             self.table.setItem(r, 1, type_item)
             self.table.setItem(r, 2, size)
+            text, color = self._status_by_path.get(
+                os.path.abspath(it["path"]),
+                ("Ready" if exists else "Missing", Palette.text_faint))
+            self.table.setItem(r, 3, self._status_cell(text, color))
         self.hint.setVisible(not self.items)
+        n = len(self.items)
+        self.count_pill.setText(f"{n} payload{'s' if n != 1 else ''}")
         if self.items:
             self.table.selectRow(0)
 
-    def on_send(self) -> None:
+    @staticmethod
+    def _status_cell(text: str, color: str) -> QTableWidgetItem:
+        item = QTableWidgetItem(text)
+        item.setTextAlignment(Qt.AlignCenter)
+        item.setForeground(QColor(color))
+        return item
+
+    def _set_row_status(self, row: int, text: str, color: str) -> None:
+        if 0 <= row < len(self.items):
+            self._status_by_path[os.path.abspath(self.items[row]["path"])] = \
+                (text, color)
+            self.table.setItem(row, 3, self._status_cell(text, color))
+
+    # -------------------------------------------------------------- sending
+    def _send_double_clicked(self, *_a) -> None:
+        row = self.table.currentRow()
+        if 0 <= row < len(self.items):
+            self._start_batch([row])
+
+    def on_send_selected(self) -> None:
+        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        if not rows:
+            QMessageBox.information(self, "No selection",
+                                   "Select one or more payloads to send.")
+            return
+        self._start_batch(rows)
+
+    def on_send_all(self) -> None:
+        self._start_batch(list(range(len(self.items))))
+
+    def _start_batch(self, rows: list[int]) -> None:
         if self._sender is not None and self._sender.isRunning():
             return
-        row = self.table.currentRow()
-        if not (0 <= row < len(self.items)):
-            QMessageBox.information(self, "No payload",
-                                    "Select a payload to send.")
-            return
-        item = self.items[row]
-        if not os.path.isfile(item["path"]):
-            QMessageBox.warning(self, "Missing file",
-                                f"This payload no longer exists:\n{item['path']}")
+        rows = [r for r in rows
+                if 0 <= r < len(self.items) and os.path.isfile(self.items[r]["path"])]
+        if not rows:
+            QMessageBox.information(self, "Nothing to send",
+                                   "No existing payload files in the selection.")
             return
         ip = self.ip.text().strip()
         port = self.port.value()
         if not ip:
             QMessageBox.information(self, "Target IP",
-                                    "Enter your console's IP address.")
+                                   "Enter your console's IP address.")
             return
         config.update(CFG, ip=ip, port=port)
-        self.btn_send.setEnabled(False)
+        self._ip, self._port = ip, port
+        self._queue = rows
+        self._batch_total = len(rows)
+        self._batch_done = 0
+        for r in rows:
+            self._set_row_status(r, "Queued", _BUSY)
+        self._set_sending(True)
+        self._log("=" * 40 + f"\nSending {len(rows)} payload(s) → {ip}:{port}")
+        self._send_next()
+
+    def _send_next(self) -> None:
+        if not self._queue:
+            self._finish_batch()
+            return
+        row = self._queue.pop(0)
+        self._current_row = row
+        item = self.items[row]
+        self._set_row_status(row, "Sending…", _BUSY)
+        self.table.selectRow(row)
         self.progress.setValue(0)
-        self.status.setText(f"Connecting to {ip}:{port}…")
-        self._log(f"Sending {item['name']} → {ip}:{port}")
-        self._sender = PayloadSender(item["path"], ip, port, self)
+        self.status.setText(f"Sending {item['name']} → {self._ip}:{self._port}  "
+                            f"({self._batch_done + 1}/{self._batch_total})")
+        self._log(f"→ {item['name']}")
+        self._sender = PayloadSender(item["path"], self._ip, self._port, self)
         self._sender.progress.connect(self._on_progress)
         self._sender.done.connect(self._on_done)
         self._sender.start()
@@ -266,13 +395,42 @@ class PayloadSenderTab(QWidget):
     def _on_progress(self, sent: int, total: int) -> None:
         if total:
             self.progress.setValue(int(sent / total * 100))
-            self.status.setText(f"{human_size(sent)} / {human_size(total)}")
 
     def _on_done(self, ok: bool, message: str) -> None:
-        self.btn_send.setEnabled(True)
+        self._set_row_status(self._current_row,
+                             "✓ Sent" if ok else "✗ Failed",
+                             _OK if ok else _FAIL)
+        if ok:
+            self._batch_done += 1
         self.progress.setValue(100 if ok else 0)
-        self.status.setText("✓ Sent" if ok else "✗ Failed")
         self._log(("✓ " if ok else "✗ ") + message)
+        self._sender = None
+        self._send_next()
+
+    def _finish_batch(self) -> None:
+        self._set_sending(False)
+        failed = self._batch_total - self._batch_done
+        msg = f"Done — {self._batch_done}/{self._batch_total} sent"
+        if failed:
+            msg += f", {failed} failed"
+        self.status.setText(msg)
+        self._log(msg + "\n" + "=" * 40)
+
+    def on_cancel(self) -> None:
+        """Stop after the current file (in-flight send can't be interrupted)."""
+        self._queue.clear()
+        for r in range(len(self.items)):
+            text, _c = self._status_by_path.get(
+                os.path.abspath(self.items[r]["path"]), ("", ""))
+            if text == "Queued":
+                self._set_row_status(r, "Cancelled", Palette.text_faint)
+        self.status.setText("Stopping after current file…")
+
+    def _set_sending(self, sending: bool) -> None:
+        for w in (self.btn_send_sel, self.btn_send_all, self.btn_add,
+                  self.btn_scan, self.btn_remove, self.btn_clear):
+            w.setEnabled(not sending)
+        self.btn_cancel.setEnabled(sending)
 
     # ---------------------------------------------------------------- misc
     def _log(self, text: str) -> None:
@@ -280,14 +438,19 @@ class PayloadSenderTab(QWidget):
 
     # ---------------------------------------------------------- drag & drop
     def dragEnterEvent(self, e: QDragEnterEvent) -> None:
-        if e.mimeData().hasUrls() and any(
-                os.path.splitext(u.toLocalFile())[1].lower() in SUPPORTED_EXTS
-                for u in e.mimeData().urls()):
+        urls = e.mimeData().urls() if e.mimeData().hasUrls() else []
+        if any(os.path.isdir(u.toLocalFile()) or is_payload(u.toLocalFile())
+               for u in urls):
             e.acceptProposedAction()
 
     def dropEvent(self, e: QDropEvent) -> None:
-        added = sum(1 for u in e.mimeData().urls()
-                    if self._add_path(u.toLocalFile()))
+        added = 0
+        for u in e.mimeData().urls():
+            p = u.toLocalFile()
+            if os.path.isdir(p):
+                added += sum(1 for f in scan_payloads(p) if self._add_path(f))
+            elif self._add_path(p):
+                added += 1
         if added:
             self._persist()
             self._reload_table()
