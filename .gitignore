@@ -10,7 +10,7 @@ dist/
 help.txt
 # Virtual environment
 .venv/
-
+Minecraft
 # Runtime / generated
 config.ini
 *.log
