@@ -50,6 +50,16 @@ def stylesheet() -> str:
 
     QWidget#Root {{ background: {p.bg}; }}
 
+    /* ---- Dialogs / message boxes ----
+       Fusion gives top-level dialogs a near-white window background, which
+       collides with the light default text color above and makes labels
+       unreadable. Force the dark surface on every dialog so QLabel text,
+       input dialogs, confirmations and the About box all read correctly. */
+    QDialog {{ background: {p.bg}; color: {p.text}; }}
+    QMessageBox {{ background: {p.surface}; color: {p.text}; }}
+    QMessageBox QLabel {{ color: {p.text}; }}
+    QInputDialog QLabel {{ color: {p.text}; }}
+
     /* ---- Header ---- */
     QFrame#Header {{
         background: qlineargradient(x1:0 y1:0, x2:1 y2:0,
@@ -102,14 +112,16 @@ def stylesheet() -> str:
     QPushButton#Ghost:hover {{ border-color: {p.border_focus}; }}
 
     /* ---- Inputs ---- */
-    QLineEdit, QComboBox, QSpinBox {{
+    QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QTextEdit {{
         background: {p.surface_alt};
         border: 1px solid {p.border};
         border-radius: 9px;
         padding: 7px 10px;
+        color: {p.text};
         selection-background-color: {p.accent};
     }}
-    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {p.border_focus}; }}
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
+    QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {p.border_focus}; }}
     QComboBox::drop-down {{ border: none; width: 22px; }}
     QComboBox QAbstractItemView {{
         background: {p.surface_alt};
@@ -156,6 +168,27 @@ def stylesheet() -> str:
         background: rgba(99,102,241,0.10);
     }}
     QStackedWidget {{ background: transparent; }}
+
+    /* ---- List widgets (Site Manager, console detection results) ---- */
+    QListWidget, QListView {{
+        background: {p.surface};
+        border: 1px solid {p.border};
+        border-radius: 12px;
+        alternate-background-color: {p.surface_alt};
+        selection-background-color: {p.accent};
+        selection-color: white;
+        padding: 4px;
+    }}
+    QListWidget::item, QListView::item {{
+        padding: 7px 10px; border-radius: 8px; color: {p.text};
+    }}
+    QListWidget::item:hover, QListView::item:hover {{
+        background: rgba(99,102,241,0.10);
+    }}
+    QListWidget::item:selected, QListView::item:selected {{
+        background: {p.accent}; color: white;
+    }}
+    QListWidget::item:disabled, QListView::item:disabled {{ color: {p.text_faint}; }}
 
     /* ---- Tabs ---- */
     QTabWidget::pane {{
