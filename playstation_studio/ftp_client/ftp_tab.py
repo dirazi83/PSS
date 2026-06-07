@@ -14,12 +14,13 @@ import posixpath
 import shutil
 import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QMimeData, Qt, QUrl, Signal
+from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFrame, QHBoxLayout, QHeaderView,
     QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QSplitter, QStyle, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..shared.config import config
@@ -64,6 +65,71 @@ def dir_size(path: str) -> int:
     return total
 
 
+class FileTable(QTableWidget):
+    """File list that can be a drag *source* (emits file:// URLs of the selected
+    rows) and/or a drop *target* (accepts dropped file URLs).
+
+    This is what makes "drag local files onto the remote pane to upload" work,
+    for drags coming from the local pane *or* straight from the OS file manager.
+    """
+
+    filesDropped = Signal(list)        # list[str] of local paths dropped here
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(0, 3, parent)
+        self._path_provider = None     # callable(row) -> local abs path | None
+        self._accept_drops = False
+
+    def enable_drag(self, provider) -> None:
+        self._path_provider = provider
+        self.setDragEnabled(True)
+
+    def enable_drop(self) -> None:
+        self._accept_drops = True
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+
+    # ---- drag source ----
+    def startDrag(self, _actions) -> None:
+        if not self._path_provider:
+            return
+        rows = sorted({i.row() for i in self.selectionModel().selectedRows()})
+        urls = []
+        for r in rows:
+            p = self._path_provider(r)
+            if p:
+                urls.append(QUrl.fromLocalFile(p))
+        if not urls:
+            return
+        mime = QMimeData()
+        mime.setUrls(urls)
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(Qt.CopyAction)
+
+    # ---- drop target ----
+    def dragEnterEvent(self, e) -> None:
+        if self._accept_drops and e.mimeData().hasUrls():
+            e.acceptProposedAction()
+        else:
+            super().dragEnterEvent(e)
+
+    def dragMoveEvent(self, e) -> None:
+        if self._accept_drops and e.mimeData().hasUrls():
+            e.acceptProposedAction()
+        else:
+            super().dragMoveEvent(e)
+
+    def dropEvent(self, e) -> None:
+        if self._accept_drops and e.mimeData().hasUrls():
+            paths = [u.toLocalFile() for u in e.mimeData().urls() if u.toLocalFile()]
+            if paths:
+                self.filesDropped.emit(paths)
+                e.acceptProposedAction()
+                return
+        super().dropEvent(e)
+
+
 class FtpClientTab(QWidget):
     QUEUE_COLS = ["File", "Direction", "Size", "Progress", "Speed", "ETA", "Status"]
 
@@ -83,6 +149,10 @@ class FtpClientTab(QWidget):
         self.local_fwd: list[str] = []
         self.remote_back: list[str] = []
         self.remote_fwd: list[str] = []
+        self._local_sort: tuple[int, bool] = (0, True)    # (column, ascending)
+        self._remote_sort: tuple[int, bool] = (0, True)
+        self._dir_icon = self.style().standardIcon(QStyle.SP_DirIcon)
+        self._file_icon = self.style().standardIcon(QStyle.SP_FileIcon)
         self.queue_jobs: list[TransferJob] = []
         self.jobs: dict[int, TransferJob] = {}
         self.job_rows: dict[int, int] = {}
@@ -174,7 +244,7 @@ class FtpClientTab(QWidget):
         nav.addWidget(refresh)
         lay.addLayout(nav)
 
-        table = QTableWidget(0, 3)
+        table = FileTable()
         table.setHorizontalHeaderLabels(["Name", "Size", "Modified"])
         table.verticalHeader().setVisible(False)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -183,6 +253,9 @@ class FtpClientTab(QWidget):
         table.setShowGrid(False)
         table.setAlternatingRowColors(True)
         table.setContextMenuPolicy(Qt.CustomContextMenu)
+        # click a header to sort; click again to reverse
+        table.horizontalHeader().setSectionsClickable(True)
+        table.horizontalHeader().setSortIndicatorShown(True)
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         lay.addWidget(table, stretch=1)
         return frame, table, path_edit, back, fwd, up, refresh
@@ -199,6 +272,11 @@ class FtpClientTab(QWidget):
             lambda: self._local_go(self.local_path.text().strip()))
         self.local_table.itemDoubleClicked.connect(self._on_local_double)
         self.local_table.customContextMenuRequested.connect(self._local_menu)
+        self.local_table.horizontalHeader().sectionClicked.connect(self._sort_local)
+        # local pane is a drag source: drag selected files onto the remote pane
+        self.local_table.enable_drag(
+            lambda r: os.path.join(self.local_cwd, self.local_entries[r].name)
+            if 0 <= r < len(self.local_entries) else None)
         return frame
 
     def _build_remote_pane(self) -> QFrame:
@@ -214,6 +292,10 @@ class FtpClientTab(QWidget):
             lambda: self._remote_go(self.remote_path.text().strip()))
         self.remote_table.itemDoubleClicked.connect(self._on_remote_double)
         self.remote_table.customContextMenuRequested.connect(self._remote_menu)
+        self.remote_table.horizontalHeader().sectionClicked.connect(self._sort_remote)
+        # remote pane is a drop target: drop OS files or local-pane items to upload
+        self.remote_table.enable_drop()
+        self.remote_table.filesDropped.connect(self._on_remote_drop)
 
         # advanced: raw FTP command bar (hidden unless Advanced is on)
         self.raw_row = QWidget()
@@ -378,9 +460,9 @@ class FtpClientTab(QWidget):
         self.remote_cwd = path
         if not self.advanced:
             entries = [e for e in entries if not e.name.startswith(".")]
-        self.remote_entries = entries
+        self.remote_entries = self._apply_sort(entries, self._remote_sort)
         self.remote_path.setText(path)
-        self._fill_table(self.remote_table, entries)
+        self._fill_table(self.remote_table, self.remote_entries)
         self._update_nav_buttons()
 
     def _on_remote_double(self, item: QTableWidgetItem) -> None:
@@ -414,7 +496,8 @@ class FtpClientTab(QWidget):
         self._local_go(os.path.dirname(self.local_cwd.rstrip(os.sep)) or self.local_cwd)
 
     def _refresh_local(self) -> None:
-        self.local_entries = list_local(self.local_cwd, show_hidden=self.advanced)
+        entries = list_local(self.local_cwd, show_hidden=self.advanced)
+        self.local_entries = self._apply_sort(entries, self._local_sort)
         self.local_path.setText(self.local_cwd)
         self._fill_table(self.local_table, self.local_entries)
 
@@ -430,18 +513,52 @@ class FtpClientTab(QWidget):
         self.remote_fwd_btn.setEnabled(self._connected and bool(self.remote_fwd))
 
     # ---- shared table fill ----
-    @staticmethod
-    def _fill_table(table: QTableWidget, entries: list[Entry]) -> None:
+    def _fill_table(self, table: QTableWidget, entries: list[Entry]) -> None:
         table.setRowCount(0)
         for e in entries:
             r = table.rowCount()
             table.insertRow(r)
-            icon = "📁 " if e.is_dir else "📄 "
-            table.setItem(r, 0, QTableWidgetItem(icon + e.name))
+            # Name cell text is JUST the name (icon via setIcon) so keyboard
+            # type-ahead — jump to a file by typing its first letters — works.
+            name = QTableWidgetItem(e.name)
+            name.setIcon(self._dir_icon if e.is_dir else self._file_icon)
+            table.setItem(r, 0, name)
             size = QTableWidgetItem("" if e.is_dir else human_size(e.size))
             size.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             table.setItem(r, 1, size)
             table.setItem(r, 2, QTableWidgetItem(e.modified))
+
+    # ---- column sorting (folders first, then the chosen key) ----
+    @staticmethod
+    def _apply_sort(entries: list[Entry], sort: tuple[int, bool]) -> list[Entry]:
+        col, asc = sort
+        if col == 1:
+            key = lambda e: e.size
+        elif col == 2:
+            key = lambda e: e.modified
+        else:
+            key = lambda e: e.name.lower()
+        # keep directories grouped above files, then sort within each group
+        dirs = sorted((e for e in entries if e.is_dir), key=key, reverse=not asc)
+        files = sorted((e for e in entries if not e.is_dir), key=key, reverse=not asc)
+        return dirs + files
+
+    def _toggle_sort(self, cur: tuple[int, bool], col: int) -> tuple[int, bool]:
+        return (col, not cur[1]) if cur[0] == col else (col, True)
+
+    def _sort_local(self, col: int) -> None:
+        self._local_sort = self._toggle_sort(self._local_sort, col)
+        self.local_entries = self._apply_sort(self.local_entries, self._local_sort)
+        self.local_table.horizontalHeader().setSortIndicator(
+            col, Qt.AscendingOrder if self._local_sort[1] else Qt.DescendingOrder)
+        self._fill_table(self.local_table, self.local_entries)
+
+    def _sort_remote(self, col: int) -> None:
+        self._remote_sort = self._toggle_sort(self._remote_sort, col)
+        self.remote_entries = self._apply_sort(self.remote_entries, self._remote_sort)
+        self.remote_table.horizontalHeader().setSortIndicator(
+            col, Qt.AscendingOrder if self._remote_sort[1] else Qt.DescendingOrder)
+        self._fill_table(self.remote_table, self.remote_entries)
 
     def on_refresh(self) -> None:
         self._refresh_local()
@@ -656,6 +773,26 @@ class FtpClientTab(QWidget):
             remote = posixpath.join(self.remote_cwd, e.name)
             local = os.path.join(self.local_cwd, e.name)
             self._enqueue("download", local, remote, e.size, e.name, e.is_dir)
+
+    def _on_remote_drop(self, paths: list[str]) -> None:
+        """Files dropped onto the remote pane (from the OS or the local pane)
+        are uploaded to the current remote directory."""
+        if not self._connected:
+            QMessageBox.information(self, "Not connected",
+                                    "Connect to a server before uploading.")
+            return
+        added = 0
+        for p in paths:
+            if not os.path.exists(p):
+                continue
+            name = os.path.basename(p.rstrip(os.sep))
+            is_dir = os.path.isdir(p)
+            remote = posixpath.join(self.remote_cwd, name)
+            size = dir_size(p) if is_dir else os.path.getsize(p)
+            self._enqueue("upload", p, remote, size, name, is_dir)
+            added += 1
+        if added:
+            self._log(f"Uploading {added} dropped item(s) → {self.remote_cwd}")
 
     def _enqueue(self, direction: str, local: str, remote: str,
                  size: int, name: str, is_dir: bool) -> None:
