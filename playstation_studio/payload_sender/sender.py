@@ -1,10 +1,3 @@
-"""Send a payload file to a console over a raw TCP socket.
-
-Many PS4/PS5 ELF loaders (elfldr / etaHEN / similar) simply listen on a
-TCP port and execute whatever bytes you stream to them. This mirrors that:
-open a connection to ``ip:port`` and send the file.
-"""
-
 from __future__ import annotations
 
 import errno
@@ -13,6 +6,7 @@ import socket
 
 from PySide6.QtCore import QThread, Signal
 
+# Assuming this relative import matches your project layout
 from ..shared.config import config
 
 # Common loader ports, shown as quick presets in the UI.
@@ -23,12 +17,11 @@ PORT_PRESETS = [
     ("JAR loader (9025)", 9025),
 ]
 
-# Built-in PS4/PS5 payload file types. The user can extend this with custom
-# extensions in the Payload Sender (saved to config).
+# Built-in PS4/PS5 payload file types.
 DEFAULT_EXTS = (".elf", ".bin", ".jar", ".self", ".prx", ".sprx")
 SUPPORTED_EXTS = DEFAULT_EXTS  # kept for backward-compatibility
 
-_CHUNK = 64 * 1024
+_CHUNK = 64 * 1024  # 64KB chunks
 
 
 def custom_exts() -> tuple[str, ...]:
@@ -118,34 +111,54 @@ class PayloadSender(QThread):
         except OSError as exc:
             self.done.emit(False, f"Cannot read {name}: {exc}")
             return
+
+        sent = 0
+        ack = ""
+        
         try:
-            with open(self.path, "rb") as fh, \
-                    socket.create_connection((self.ip, self.port), timeout=10) as sock:
+            # 1. Connect with an initial 5-second timeout to catch dead IPs quickly
+            with socket.create_connection((self.ip, self.port), timeout=5.0) as sock:
+                
+                # 2. Optimize socket behavior
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                sent = 0
-                while True:
-                    chunk = fh.read(_CHUNK)
-                    if not chunk:
-                        break
-                    sock.sendall(chunk)
-                    sent += len(chunk)
-                    self.progress.emit(sent, total)
-                # signal end-of-data and give loaders that reply a moment to ack
-                ack = ""
+                
+                # CRITICAL: Extend timeout for the actual file streaming phase 
+                # to prevent slow networks/consoles from throwing a TimeoutError mid-stream.
+                sock.settimeout(30.0)
+
+                # 3. Stream the file
+                with open(self.path, "rb") as fh:
+                    while True:
+                        chunk = fh.read(_CHUNK)
+                        if not chunk:
+                            break
+                        sock.sendall(chunk)
+                        sent += len(chunk)
+                        self.progress.emit(sent, total)
+
+                # 4. Handle Post-transmission / ACK gracefully
                 try:
-                    sock.shutdown(socket.SHUT_WR)
+                    # Give the console a brief window to process the final blocks
                     sock.settimeout(2.0)
+                    sock.shutdown(socket.SHUT_WR)
+                    
                     reply = sock.recv(256)
                     if reply:
                         ack = "  · " + reply.decode("utf-8", "replace").strip()[:80]
                 except OSError:
+                    # Many loaders instantly drop the link to execute the payload. 
+                    # If it drops here but we sent all bytes, consider it a total success.
                     pass
+
         except (OSError, socket.timeout) as exc:
             self.done.emit(False, _explain(exc, self.ip, self.port))
             return
+
+        # 5. Final validation
         if sent < total:
             self.done.emit(False, f"Only sent {sent:,}/{total:,} bytes to "
                                   f"{self.ip}:{self.port} before the link dropped.")
             return
+
         self.done.emit(
             True, f"Sent {name} → {self.ip}:{self.port}  ({sent:,} bytes){ack}")
