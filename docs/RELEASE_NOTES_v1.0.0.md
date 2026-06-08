@@ -54,6 +54,8 @@ standalone app for Windows and macOS — no Python install required.
 ### PS5 PFS Compressor
 - Batch compression via the bundled MkPFS engine, with per-game progress and ratings.
 - **Compress All** or **Compress Selected** — pack the whole queue or just the picked games.
+- **ShadowMountPlus compatible** by default — images use a >= 32 KiB block so they mount
+  cleanly under ShadowMountPlus; toggle off for the smallest image on tiny-file games.
 - Pre-flight size estimate, auto block-sizing for small-file games, persistent history.
 - Configurable temp folder; warnings for slow sources (network shares, iCloud).
 

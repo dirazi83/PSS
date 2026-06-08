@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from .estimate import Estimate, EstimatorThread, compression_rating
 from . import history
-from .jobs import Job, PackSettings, Status, find_game_dirs
+from .jobs import Job, PackSettings, Status, find_game_dirs, SHADOWMOUNT_MIN_BLOCK
 from .runner import BatchRunner
 from ..shared.config import config
 from ..shared.diskutil import (
@@ -272,11 +272,25 @@ class Ps5CompressTab(QWidget):
         self._sync_temp_row()
 
         # toggles
+        # ShadowMountPlus compatibility: force a >= 32 KiB block so images mount
+        # cleanly under ShadowMountPlus. On by default.
+        self.cb_shadowmount = QCheckBox("ShadowMountPlus compatible (≥32 KiB block)")
+        self.cb_shadowmount.setToolTip(
+            "Build PFS images that mount cleanly under ShadowMountPlus.\n"
+            f"Forces a {SHADOWMOUNT_MIN_BLOCK // 1024} KiB block size (ShadowMountPlus "
+            "rejects smaller clusters on its default config).\n"
+            "Turn off only if you don't use ShadowMountPlus and want the smallest "
+            "possible image for games with thousands of tiny files.")
+        self.cb_shadowmount.setChecked(
+            bool(config.get(CFG, "shadowmount_compatible", True)))
+        self.cb_shadowmount.toggled.connect(self._on_shadowmount_toggle)
+
         self.cb_autoblock = QCheckBox("Shrink small-file games (auto block size)")
-        self.cb_autoblock.setToolTip(
+        self._autoblock_tip = (
             "Pick the block size that minimises per-file padding. Games with "
             "thousands of tiny files (e.g. Minecraft) can otherwise pack LARGER "
             "than the original because each file is padded to a 64 KiB block.")
+        self.cb_autoblock.setToolTip(self._autoblock_tip)
         self.cb_autoblock.setChecked(bool(config.get(CFG, "auto_block_size", True)))
         self.cb_autoblock.toggled.connect(
             lambda on: config.set(CFG, "auto_block_size", on))
@@ -292,10 +306,12 @@ class Ps5CompressTab(QWidget):
         self.cb_lowmem.toggled.connect(
             lambda on: config.set(CFG, "low_memory", on))
         self.cb_overwrite = QCheckBox("Overwrite existing images")
-        for cb in (self.cb_autoblock, self.cb_skipexec, self.cb_verify,
-                   self.cb_encrypt, self.cb_require, self.cb_lowmem,
-                   self.cb_overwrite):
+        for cb in (self.cb_shadowmount, self.cb_autoblock, self.cb_skipexec,
+                   self.cb_verify, self.cb_encrypt, self.cb_require,
+                   self.cb_lowmem, self.cb_overwrite):
             lay.addWidget(cb)
+        # auto-fit is overridden while ShadowMountPlus mode is on
+        self._on_shadowmount_toggle(self.cb_shadowmount.isChecked())
 
         lay.addStretch(1)
         credit = QLabel('Compression engine: <a href="https://github.com/PSBrew/MkPFS">'
@@ -529,7 +545,12 @@ class Ps5CompressTab(QWidget):
         self.btn_estimate.setEnabled(False)
         self.status_lbl.setText("Estimating sizes…")
         self._log("Estimating packed sizes (reading file sizes only)…\n")
-        self._estimator = EstimatorThread([j.source_dir for j in self.jobs], self)
+        # In ShadowMountPlus mode the block can't go below 32 KiB, so estimate
+        # the footprint the pack will actually produce.
+        min_block = (SHADOWMOUNT_MIN_BLOCK if self.cb_shadowmount.isChecked()
+                     else 4096)
+        self._estimator = EstimatorThread(
+            [j.source_dir for j in self.jobs], min_block, self)
         self._estimator.one.connect(self._on_estimate_one)
         self._estimator.finished_all.connect(self._on_estimate_done)
         self._estimator.start()
@@ -559,8 +580,10 @@ class Ps5CompressTab(QWidget):
         self.status_lbl.setText(msg)
         self._log(msg + ".\n")
         self._refresh_stats()
-        # Nudge the user to keep auto-fit on when it clearly helps.
-        if bloat and not self.cb_autoblock.isChecked():
+        # Nudge the user to keep auto-fit on when it clearly helps. Skip the
+        # nudge in ShadowMountPlus mode, where the block is intentionally fixed.
+        if bloat and not self.cb_autoblock.isChecked() \
+                and not self.cb_shadowmount.isChecked():
             names = ", ".join(self._job_for(e).name for e in bloat[:4])
             choice = QMessageBox.question(
                 self, "Enable auto block size?",
@@ -619,6 +642,7 @@ class Ps5CompressTab(QWidget):
             low_memory=self.cb_lowmem.isChecked(),
             overwrite=self.cb_overwrite.isChecked(),
             auto_block_size=self.cb_autoblock.isChecked(),
+            shadowmount_compatible=self.cb_shadowmount.isChecked(),
             temp_mode=self.temp_mode.currentData() or TEMP_MODE_APP,
             temp_path=self.temp_path.text().strip(),
         )
@@ -921,6 +945,16 @@ class Ps5CompressTab(QWidget):
     def _on_compress_toggle(self, on: bool) -> None:
         self.level.setEnabled(on)
         self.lbl_level.setEnabled(on)
+
+    def _on_shadowmount_toggle(self, on: bool) -> None:
+        config.set(CFG, "shadowmount_compatible", on)
+        # While SMP mode is on the block size is fixed >= 32 KiB, so auto-fit
+        # has no effect — disable it and explain why.
+        self.cb_autoblock.setEnabled(not on)
+        self.cb_autoblock.setToolTip(
+            f"Overridden while 'ShadowMountPlus compatible' is on "
+            f"(block fixed at {SHADOWMOUNT_MIN_BLOCK // 1024} KiB)."
+            if on else self._autoblock_tip)
 
     # ---------------------------------------------------------- drag/drop
     def _set_drop_active(self, active: bool) -> None:

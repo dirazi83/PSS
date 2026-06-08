@@ -55,6 +55,12 @@ def mkpfs_command() -> list[str]:
 GAME_MARKERS = ("eboot.bin", "sce_sys")
 PFS_EXTENSIONS = (".ffpfs", ".ffpfsc", ".pfs", ".dat", ".bin")
 
+# ShadowMountPlus (https://github.com/drakmor/ShadowMountPlus) rejects a PFS
+# image whose cluster size is below the configured lvd_pfs_sector_size, whose
+# recommended default is 32768. Building with a >= 32 KiB block makes images
+# mount cleanly on its default config without an autotune round-trip.
+SHADOWMOUNT_MIN_BLOCK = 32768
+
 
 def dir_is_game(path: Path) -> bool:
     """True when *path* directly contains a game-dump marker."""
@@ -117,6 +123,7 @@ class PackSettings:
     low_memory: bool = False        # cap to 1 worker to minimise peak RAM
     overwrite: bool = False         # re-pack even if output exists
     auto_block_size: bool = True    # pick block size that minimises padding
+    shadowmount_compatible: bool = True  # force block >= 32 KiB for ShadowMountPlus
     temp_mode: str = "app"          # app | custom | game (see shared.paths)
     temp_path: str = ""             # custom temp folder when temp_mode == custom
 
@@ -198,10 +205,16 @@ class Job:
             cmd += ["--compression-level", str(settings.compression_level)]
         if settings.skip_executable_compression:
             cmd += ["--skip-executable-compression"]
-        # Games with many tiny files waste huge space padding each one up to the
-        # 64 KiB block; "auto-fit" picks the block size that minimises that
-        # padding so the image doesn't end up larger than the source.
-        if settings.auto_block_size:
+        # Block size selection:
+        # - ShadowMountPlus mode forces a >= 32 KiB block so the image mounts
+        #   cleanly under ShadowMountPlus (overrides auto-fit, which could pick a
+        #   smaller block that SMP would reject/autotune).
+        # - Otherwise "auto-fit" picks the block size that minimises per-file
+        #   padding (games with thousands of tiny files would otherwise pack
+        #   *larger* than the source at the 64 KiB default).
+        if settings.shadowmount_compatible:
+            cmd += ["--block-size", str(SHADOWMOUNT_MIN_BLOCK)]
+        elif settings.auto_block_size:
             cmd += ["--block-size", "auto-fit"]
         # Direct intermediate data to the chosen temp location (fast/empty disk
         # or beside the game) instead of a possibly full/slow system temp.

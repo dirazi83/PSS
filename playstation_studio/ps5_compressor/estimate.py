@@ -56,8 +56,13 @@ def _aligned(sizes: list[int], block: int) -> int:
     return sum((math.ceil(s / block) * block) if s > 0 else block for s in sizes)
 
 
-def estimate_footprint(source_dir: str) -> Estimate:
-    """Predict the PFS footprint of *source_dir* (stat-only, no file reads)."""
+def estimate_footprint(source_dir: str, min_block: int = AUTO_FIT_CANDIDATES[0]) -> Estimate:
+    """Predict the PFS footprint of *source_dir* (stat-only, no file reads).
+
+    ``min_block`` floors the block sizes considered for the "best" footprint, so
+    ShadowMountPlus mode (>= 32 KiB block) estimates the size it will actually
+    produce rather than a smaller auto-fit block it will not use.
+    """
     sizes: list[int] = []
     try:
         for root, _dirs, files in os.walk(source_dir):
@@ -70,8 +75,9 @@ def estimate_footprint(source_dir: str) -> Estimate:
         return Estimate(source_dir=source_dir, ok=False)
     est = Estimate(source_dir=source_dir, files=len(sizes), raw=sum(sizes))
     est.foot_default = _aligned(sizes, DEFAULT_BLOCK)
-    best = min(AUTO_FIT_CANDIDATES,
-               key=lambda b: (_aligned(sizes, b), -b))
+    candidates = tuple(b for b in AUTO_FIT_CANDIDATES if b >= min_block) \
+        or (AUTO_FIT_CANDIDATES[-1],)
+    best = min(candidates, key=lambda b: (_aligned(sizes, b), -b))
     est.best_block = best
     est.foot_best = _aligned(sizes, best)
     return est
@@ -83,9 +89,11 @@ class EstimatorThread(QThread):
     one = Signal(int, object)      # index, Estimate
     finished_all = Signal()
 
-    def __init__(self, sources: list[str], parent=None) -> None:
+    def __init__(self, sources: list[str], min_block: int = AUTO_FIT_CANDIDATES[0],
+                 parent=None) -> None:
         super().__init__(parent)
         self.sources = sources
+        self.min_block = min_block
         self._running = True
 
     def stop(self) -> None:
@@ -95,7 +103,7 @@ class EstimatorThread(QThread):
         for i, src in enumerate(self.sources):
             if not self._running:
                 break
-            self.one.emit(i, estimate_footprint(src))
+            self.one.emit(i, estimate_footprint(src, self.min_block))
         self.finished_all.emit()
 
 
