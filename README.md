@@ -78,8 +78,8 @@ end users who don't have Python installed.
 - 💿 **PKG manager** — sort by Games / Updates / DLC, view cover art and metadata,
   bulk-rename, export to Excel, and remote-install.
 - 🗜️ **PS5 PFS compressor** — batch compression with pre-flight size estimates,
-  auto block-sizing, compression ratings, **Compress All or Compress Selected**, and
-  **ShadowMountPlus-compatible** images (≥32 KiB block) on by default.
+  auto block-sizing, compression ratings, **Compress All or Compress Selected**, and an
+  optional **ShadowMountPlus-compatible** mode (≥32 KiB block).
 - 🎨 **Modern dark theme** — a single, carefully tuned palette that's consistent across
   every window, table and dialog.
 - 💾 **Persistent settings** — IPs, ports and folder paths are remembered between launches.
@@ -513,9 +513,10 @@ The first official public release of PlayStation Studio.
 **PS5 PFS Compressor**
 - Batch compression via the bundled MkPFS engine with per-game progress and ratings.
 - **Compress All** or **Compress Selected** — pack the whole list or just the games you pick.
-- **ShadowMountPlus compatible** (on by default) — builds images with a ≥32 KiB block so
-  they mount cleanly under [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus);
-  turn it off for the smallest possible image on games with thousands of tiny files.
+- **ShadowMountPlus compatible** (optional, off by default) — turn it on to build images
+  with a ≥32 KiB block that mount cleanly under
+  [ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus); left off, you get the
+  smallest possible image on games with thousands of tiny files.
 - Pre-flight size estimate, auto block-sizing for small-file games, and a history viewer.
 - Configurable temp folder and slow-source (network / iCloud) warnings.
 

@@ -123,7 +123,7 @@ class PackSettings:
     low_memory: bool = False        # cap to 1 worker to minimise peak RAM
     overwrite: bool = False         # re-pack even if output exists
     auto_block_size: bool = True    # pick block size that minimises padding
-    shadowmount_compatible: bool = True  # force block >= 32 KiB for ShadowMountPlus
+    shadowmount_compatible: bool = False  # opt-in: force block >= 32 KiB for ShadowMountPlus
     temp_mode: str = "app"          # app | custom | game (see shared.paths)
     temp_path: str = ""             # custom temp folder when temp_mode == custom
 

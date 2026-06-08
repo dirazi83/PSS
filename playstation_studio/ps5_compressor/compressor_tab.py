@@ -273,16 +273,17 @@ class Ps5CompressTab(QWidget):
 
         # toggles
         # ShadowMountPlus compatibility: force a >= 32 KiB block so images mount
-        # cleanly under ShadowMountPlus. On by default.
+        # cleanly under ShadowMountPlus. Opt-in (off by default) because it makes
+        # tiny-file games larger than the smallest auto-fit image.
         self.cb_shadowmount = QCheckBox("ShadowMountPlus compatible (≥32 KiB block)")
         self.cb_shadowmount.setToolTip(
             "Build PFS images that mount cleanly under ShadowMountPlus.\n"
             f"Forces a {SHADOWMOUNT_MIN_BLOCK // 1024} KiB block size (ShadowMountPlus "
             "rejects smaller clusters on its default config).\n"
-            "Turn off only if you don't use ShadowMountPlus and want the smallest "
-            "possible image for games with thousands of tiny files.")
+            "Turn this on if you use ShadowMountPlus. Leaving it off produces the "
+            "smallest possible image for games with thousands of tiny files.")
         self.cb_shadowmount.setChecked(
-            bool(config.get(CFG, "shadowmount_compatible", True)))
+            bool(config.get(CFG, "shadowmount_compatible", False)))
         self.cb_shadowmount.toggled.connect(self._on_shadowmount_toggle)
 
         self.cb_autoblock = QCheckBox("Shrink small-file games (auto block size)")
