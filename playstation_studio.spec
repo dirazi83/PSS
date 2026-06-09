@@ -33,6 +33,16 @@ block_cipher = None
 # platform-specific app icon
 ICON = f"{PKG}/assets/app.ico" if sys.platform.startswith("win") else f"{PKG}/assets/app.icns"
 
+# Windows version resource (CompanyName/ProductName/etc.). Embedding real
+# metadata makes an unsigned PyInstaller exe look like legitimate software and
+# clears many antivirus / SmartScreen false positives. Windows-only.
+VERSION_FILE = f"{PKG}/version_info.txt" if sys.platform.startswith("win") else None
+
+# Do NOT pack with UPX: UPX-compressed PyInstaller binaries are flagged as
+# malware far more often (packers are associated with malware), which is a
+# major cause of the "this download may be a virus" block.
+USE_UPX = False
+
 a = Analysis(
     ["pyi_entry.py"],
     pathex=[],
@@ -53,10 +63,13 @@ exe = EXE(
     name="PlayStation Studio",
     console=False,                            # GUI app — no terminal window
     disable_windowed_traceback=False,
+    upx=USE_UPX,                              # never UPX-pack (AV false positives)
     icon=ICON,
+    version=VERSION_FILE,                     # Windows metadata (reduces AV flags)
 )
 coll = COLLECT(
     exe, a.binaries, a.zipfiles, a.datas,
+    upx=USE_UPX,
     name="PlayStation Studio",
 )
 

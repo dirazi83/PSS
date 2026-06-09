@@ -69,6 +69,11 @@ standalone app for Windows and macOS — no Python install required.
 
 ## 🛠️ Fixes & polish in this release
 
+- **Windows download flagged as a virus (false positive):** embedded a proper Windows
+  version resource (CompanyName / ProductName / FileDescription) and disabled UPX packing
+  so the unsigned PyInstaller build trips far fewer antivirus / SmartScreen heuristics.
+  SHA-256 checksums are now published on the release; see the README for how to allow the
+  download if your browser/AV still blocks it.
 - **PS5 compressor (Windows):** sanitize output file names so titles containing
   characters Windows forbids — especially the colon in names like
   "Mortal Kombat: Legacy Kollection" — no longer fail the pack with `OSError: [Errno 22]`.

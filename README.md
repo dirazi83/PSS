@@ -129,6 +129,32 @@ and Linux).
 > an unidentified developer. On macOS, right-click the app → **Open**; on Windows, click
 > **More info → Run anyway**.
 
+#### ⚠️ "This download may be a virus" / browser blocks the zip?
+
+This is a **false positive**, not real malware. PlayStation Studio is built with
+[PyInstaller](https://pyinstaller.org), whose unpack-and-run pattern trips antivirus /
+SmartScreen / Chrome heuristics on **any** unsigned Python app — a
+[well-known PyInstaller issue](https://github.com/pyinstaller/pyinstaller/issues/6754),
+not specific to this app. The source is fully public, so you can read or build it yourself.
+
+**To allow the download:**
+
+- **Chrome / Edge:** when it says *"… may be dangerous"* or *"Failed – virus detected"*,
+  open **Downloads** (Ctrl+J) → find the file → **Keep / Keep anyway**.
+- **Windows (after extracting):** if Defender quarantines it, open **Windows Security →
+  Virus & threat protection → Protection history**, find the item, and choose **Allow**
+  (or add the extracted folder to **Exclusions**).
+
+**Verify it's the real file** with the SHA-256 checksums on the
+[Releases page](https://github.com/dirazi83/PSS/releases/tag/v1.0.0)
+(`certutil -hashfile "PlayStation Studio.exe" SHA256` on Windows, `shasum -a 256` on macOS).
+
+If your antivirus still blocks it, report the false positive (vendors usually whitelist
+within a few days): **Microsoft Defender** → <https://www.microsoft.com/en-us/wdsi/filesubmission>.
+
+> The permanent fix is a paid **code-signing certificate** (plus macOS notarization), which
+> gives the app trusted reputation so no warning appears. That's on the roadmap.
+
 ### Option B — Run from source
 
 Requires **Python 3.8 or newer**.
