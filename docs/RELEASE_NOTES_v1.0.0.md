@@ -69,6 +69,9 @@ standalone app for Windows and macOS — no Python install required.
 
 ## 🛠️ Fixes & polish in this release
 
+- **PS5 compressor (Windows):** sanitize output file names so titles containing
+  characters Windows forbids — especially the colon in names like
+  "Mortal Kombat: Legacy Kollection" — no longer fail the pack with `OSError: [Errno 22]`.
 - **Theme:** fixed dialog, list and multi-line-input contrast so every window renders
   correctly in the dark theme.
 - **Version:** unified the in-app version string to `1.0.0`.

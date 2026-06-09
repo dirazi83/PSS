@@ -98,6 +98,28 @@ def find_game_dirs(root: str | Path, max_depth: int = 3) -> list[str]:
     return found
 
 
+# Characters illegal in Windows file names. A colon is especially dangerous: it
+# is the NTFS alternate-data-stream separator, so "Game: Subtitle.ffpfs" silently
+# becomes a stream and the pack fails with EINVAL on Windows. Game titles use ':'
+# constantly ("Mortal Kombat: Legacy Kollection"), so output names must be cleaned.
+_ILLEGAL_FILENAME_CHARS = '<>:"/\\|?*'
+
+
+def safe_filename(name: str) -> str:
+    """Return *name* usable as a file name on every OS (especially Windows).
+
+    Replaces characters Windows forbids in file names (``<>:"/\\|?*`` and control
+    characters) with ``-`` and strips trailing dots/spaces (also illegal on
+    Windows). Falls back to ``image`` if nothing usable remains.
+    """
+    cleaned = "".join(
+        "-" if (ch in _ILLEGAL_FILENAME_CHARS or ord(ch) < 32) else ch
+        for ch in name
+    )
+    cleaned = cleaned.rstrip(" .")
+    return cleaned or "image"
+
+
 class Status(str, Enum):
     QUEUED = "Queued"
     RUNNING = "Running"
@@ -174,10 +196,15 @@ class Job:
         return dir_is_game(Path(self.source_dir))
 
     def default_output(self, settings: PackSettings) -> str:
-        """Compute the intended output path from the global settings."""
+        """Compute the intended output path from the global settings.
+
+        The file name is sanitised so titles containing characters illegal on
+        Windows (notably ':' in names like "Mortal Kombat: Legacy Kollection")
+        don't make the pack fail there.
+        """
         out_dir = settings.output_dir or str(Path(self.source_dir).parent)
         ext = ".ffpfsc" if settings.compress else ".ffpfs"
-        return str(Path(out_dir) / f"{self.name}{ext}")
+        return str(Path(out_dir) / f"{safe_filename(self.name)}{ext}")
 
     def resolve_actual_output(self) -> str:
         """mkpfs may auto-adjust the extension. Find the file it actually wrote
