@@ -12,7 +12,7 @@ A modern, cross-platform desktop application built with Python and PySide6. Play
 Studio brings a dual-pane FTP client, a network payload sender, a PKG library
 manager, and a PS5 PFS compressor together in one clean, dark-themed window.
 
-![PlayStation Studio — FTP Client](docs/screenshots/ftp-client.png)
+![PlayStation Studio — FTP Client](docs/screenshots/001.png)
 
 </div>
 
@@ -248,7 +248,7 @@ The FTP client uses a single, serialized control connection managed on a dedicat
 background thread, so the interface never freezes and the connection is never corrupted by
 concurrent commands.
 
-![FTP Browser](docs/screenshots/ftp-client.png)
+![FTP Browser](docs/screenshots/004.png)
 
 - **Connect / Disconnect** — connect to the selected site; the status bar shows the live
   connection state and welcome banner.
@@ -397,7 +397,7 @@ PlayStation Studio provides fast filtering and locate-as-you-type across its fil
 - **Live filter (PKG Manager):** the **Filter the current list…** box instantly narrows
   the package list as you type, across the Games / Updates / DLC tabs.
 
-![Search / filter the PKG library](docs/screenshots/ps4-pkg-manager.png)
+![Search / filter the PKG library](docs/screenshots/003.png)
 
 > A global cross-tab search box is planned for a future release; v1.0.0 ships the
 > per-list type-ahead and PKG filter described above.
@@ -575,12 +575,12 @@ A visual tour of every major tab and feature.
 The application opens into a clean, dark-themed workspace. The FTP client is the hub for
 all file management.
 
-![Main Dashboard](docs/screenshots/ftp-client.png)
+![Main Dashboard](docs/screenshots/001.png)
 
 ### FTP Browser
 Dual-pane LOCAL ⇄ REMOTE browsing with navigation history, sortable columns and a path bar.
 
-![FTP Browser](docs/screenshots/ftp-client.png)
+![FTP Browser](docs/screenshots/001.png)
 
 ### Transfer Queue
 Live per-file progress, speed and ETA across `Done`, `Transferring`, `Queued` and `Failed`
@@ -608,12 +608,12 @@ Detect consoles running an FTP server and add them as ready-to-connect sites in 
 Upload, download, rename, delete, create folders and drag & drop — from the toolbar or
 right-click context menus, on files and whole folders.
 
-![File Operations](docs/screenshots/ftp-client.png)
+![File Operations](docs/screenshots/001.png)
 
 ### Search Function
 Live filtering in the PKG library and type-ahead search in every file list.
 
-![Search Function](docs/screenshots/ps4-pkg-manager.png)
+![Search Function](docs/screenshots/003.png)
 
 ### Settings Page (Pack Settings & Temp Policy)
 Per-tool preferences such as compression options and the configurable temp-folder policy.
@@ -623,17 +623,17 @@ Per-tool preferences such as compression options and the configurable temp-folde
 ### Theme
 The unified modern dark theme, applied consistently across tables, lists, panels and dialogs.
 
-![Theme](docs/screenshots/payload-sender.png)
+![Theme](docs/screenshots/002.png)
 
 ### Payload Sender
 Find and stream payloads to a console, with per-file status and an activity log.
 
-![Payload Sender](docs/screenshots/payload-sender.png)
+![Payload Sender](docs/screenshots/002.png)
 
 ### Logs & Activity Monitor
 Every connection event, transfer and operation is recorded in the per-tab activity log.
 
-![Logs & Activity](docs/screenshots/payload-sender.png)
+![Logs & Activity](docs/screenshots/002.png)
 
 ---
 
