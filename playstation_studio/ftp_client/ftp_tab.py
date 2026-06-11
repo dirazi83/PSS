@@ -54,17 +54,6 @@ def list_local(path: str, show_hidden: bool = True) -> list[Entry]:
     return sorted(entries, key=lambda e: (not e.is_dir, e.name.lower()))
 
 
-def dir_size(path: str) -> int:
-    total = 0
-    for root, _dirs, files in os.walk(path):
-        for f in files:
-            try:
-                total += os.path.getsize(os.path.join(root, f))
-            except OSError:
-                pass
-    return total
-
-
 class FileTable(QTableWidget):
     """File list that can be a drag *source* (emits file:// URLs of the selected
     rows) and/or a drop *target* (accepts dropped file URLs).
@@ -358,6 +347,7 @@ class FtpClientTab(QWidget):
         self.service.connected.connect(self._on_connected)
         self.service.disconnected.connect(self._on_disconnected)
         self.service.listed.connect(self._on_listed)
+        self.service.transfer_started.connect(self._on_transfer_started)
         self.service.progress.connect(self._on_progress)
         self.service.transfer_done.connect(self._on_transfer_done)
         self.service.op_done.connect(self._on_op_done)
@@ -757,7 +747,9 @@ class FtpClientTab(QWidget):
         for e in sel:
             local = os.path.join(self.local_cwd, e.name)
             remote = posixpath.join(self.remote_cwd, e.name)
-            size = dir_size(local) if e.is_dir else e.size
+            # Don't walk folders on the GUI thread (that's the freeze). Enqueue
+            # immediately; the engine computes the total during the transfer.
+            size = 0 if e.is_dir else e.size
             self._enqueue("upload", local, remote, size, e.name, e.is_dir)
 
     def on_download(self) -> None:
@@ -788,11 +780,13 @@ class FtpClientTab(QWidget):
             name = os.path.basename(p.rstrip(os.sep))
             is_dir = os.path.isdir(p)
             remote = posixpath.join(self.remote_cwd, name)
-            size = dir_size(p) if is_dir else os.path.getsize(p)
+            # Folders enqueue instantly (no GUI-thread walk); the engine sizes
+            # them during the transfer on its own worker thread.
+            size = 0 if is_dir else os.path.getsize(p)
             self._enqueue("upload", p, remote, size, name, is_dir)
             added += 1
         if added:
-            self._log(f"Uploading {added} dropped item(s) → {self.remote_cwd}")
+            self._log(f"Queued {added} dropped item(s) → {self.remote_cwd}")
 
     def _enqueue(self, direction: str, local: str, remote: str,
                  size: int, name: str, is_dir: bool) -> None:
@@ -831,6 +825,17 @@ class FtpClientTab(QWidget):
     def _status_cell(text: str) -> QTableWidgetItem:
         item = QTableWidgetItem(text)
         return item
+
+    def _on_transfer_started(self, job_id: int) -> None:
+        """Worker picked the job up. For a folder it now enumerates files before
+        the first byte moves, so show 'Preparing…' instead of a stuck 'Queued'."""
+        job = self.jobs.get(job_id)
+        if not job or job.status != "Queued":
+            return
+        job.status = "Preparing…"
+        r = self.job_rows.get(job_id)
+        if r is not None:
+            self.queue.setItem(r, 6, self._status_cell("Preparing…"))
 
     def _on_progress(self, job_id: int, sent: int, total: int) -> None:
         job = self.jobs.get(job_id)

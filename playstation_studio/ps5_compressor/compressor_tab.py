@@ -6,7 +6,7 @@ import os
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import (
     QColor, QDragEnterEvent, QDropEvent, QIcon, QTextCursor,
 )
@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
 
 from .estimate import Estimate, EstimatorThread, compression_rating
 from . import history
-from .jobs import Job, PackSettings, Status, find_game_dirs, SHADOWMOUNT_MIN_BLOCK
+from .jobs import (
+    Job, PackSettings, Status, iter_game_dirs, SHADOWMOUNT_MIN_BLOCK,
+)
 from .runner import BatchRunner
 from ..shared.config import config
 from ..shared.diskutil import (
@@ -36,6 +38,50 @@ from ..shared.formatting import human_size
 CFG = "ps5"
 
 
+class GameScanWorker(QThread):
+    """Scan folders for PS5 game dumps off the GUI thread.
+
+    Mirrors the PKG Manager's ``ScanWorker``: walks the tree on a background
+    thread and emits each game (with its metadata already read) the moment it's
+    found, so the list fills in progressively and the UI never freezes — even
+    for a folder with hundreds of games on a slow network share.
+    """
+
+    found = Signal(object)        # Job, ready to add
+    progress = Signal(int, str)   # games found so far, current game name
+    done = Signal(int, bool)      # total found, cancelled
+
+    def __init__(self, roots: list[str], max_depth: int,
+                 existing: list[str], parent=None) -> None:
+        super().__init__(parent)
+        self._roots = list(roots)
+        self._max_depth = max_depth
+        self._existing = set(existing)
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+
+    def run(self) -> None:
+        seen = set(self._existing)
+        n = 0
+        for root in self._roots:
+            for source_dir in iter_game_dirs(root, self._max_depth):
+                if self._cancel:
+                    self.done.emit(n, True)
+                    return
+                if source_dir in seen:
+                    continue
+                seen.add(source_dir)
+                # Build the Job here (reads param.json + stats icon0.png) so the
+                # per-game metadata read happens off the GUI thread, not on it.
+                job = Job(source_dir=source_dir)
+                n += 1
+                self.found.emit(job)
+                self.progress.emit(n, job.name)
+        self.done.emit(n, self._cancel)
+
+
 class Ps5CompressTab(QWidget):
     COLS = ["Game", "Status", "Progress", "Input", "Output", "Saved"]
 
@@ -46,6 +92,8 @@ class Ps5CompressTab(QWidget):
         self._active_indices: list[int] | None = None   # jobs in the current run
         self.estimates: dict[str, Estimate] = {}    # by source_dir
         self._estimator: EstimatorThread | None = None
+        self._scanner: GameScanWorker | None = None  # async folder scan
+        self._scanning = False
         self.runner = BatchRunner(self)
         self._wire_runner()
 
@@ -86,7 +134,7 @@ class Ps5CompressTab(QWidget):
         self.btn_history.setObjectName("Ghost")
         self.btn_clear = QPushButton("Clear")
         self.btn_clear.setObjectName("Ghost")
-        self.btn_scan.clicked.connect(self.on_scan_folder)
+        self.btn_scan.clicked.connect(self.on_scan_clicked)
         self.btn_add.clicked.connect(self.on_add_games)
         self.btn_remove.clicked.connect(self.on_remove_selected)
         self.btn_estimate.clicked.connect(self.on_estimate)
@@ -365,13 +413,6 @@ class Ps5CompressTab(QWidget):
         return f
 
     # =========================================================== job mgmt
-    def _add_job(self, source_dir: str) -> bool:
-        source_dir = str(Path(source_dir).resolve())
-        if any(j.source_dir == source_dir for j in self.jobs):
-            return False
-        self.jobs.append(Job(source_dir=source_dir))
-        return True
-
     def _rebuild_table(self) -> None:
         self.table.setRowCount(0)
         self.bars = []
@@ -491,34 +532,82 @@ class Ps5CompressTab(QWidget):
         self.stats_pill.setText(txt)
 
     # ============================================================ actions
+    def on_scan_clicked(self) -> None:
+        """The Scan button doubles as a Stop button while a scan is running."""
+        if self._scanning:
+            self.on_stop_scan()
+        else:
+            self.on_scan_folder()
+
     def on_scan_folder(self) -> None:
         parent = QFileDialog.getExistingDirectory(self, "Select a folder of game dumps")
-        if not parent:
-            return
-        depth = self.scan_depth.value()
-        matches = find_game_dirs(parent, max_depth=depth)
-        added = sum(1 for d in matches if self._add_job(d))
-        self._rebuild_table()
-        dupes = len(matches) - added
-        msg = f"Scanned {parent} (depth {depth}): found {len(matches)} game(s)"
-        if dupes:
-            msg += f", {added} new ({dupes} already listed)"
-        self._log(msg + ".\n")
-        if not matches:
-            QMessageBox.information(self, "No games found",
-                f"No folders containing eboot.bin or sce_sys were found within "
-                f"{depth} level(s) of:\n\n{parent}\n\n"
-                "Try increasing the depth next to the Scan button.")
+        if parent:
+            self._start_scan([parent], self.scan_depth.value())
 
     def on_add_games(self) -> None:
         dirs = self._select_multiple_dirs()
-        added = sum(1 for d in dirs if self._add_job(d))
-        self._rebuild_table()
-        if added:
-            self._log(f"Added {added} game(s).\n")
+        if dirs:
+            self._start_scan(dirs, self.scan_depth.value())
+
+    # --------------------------------------------------------- async scan
+    def _start_scan(self, roots: list[str], depth: int) -> None:
+        """Scan *roots* for game dumps on a background thread, adding each game
+        to the list as it's found so the UI never blocks."""
+        if self._scanning or self.runner.running:
+            return
+        self._set_scanning(True)
+        self.status_lbl.setText("Scanning for game dumps…")
+        self._log(f"Scanning for game dumps (depth {depth})…\n")
+        self._scanner = GameScanWorker(
+            roots, depth, [j.source_dir for j in self.jobs], self)
+        self._scanner.found.connect(self._on_scan_found)
+        self._scanner.progress.connect(self._on_scan_progress)
+        self._scanner.done.connect(self._on_scan_done)
+        self._scanner.start()
+
+    def on_stop_scan(self) -> None:
+        if self._scanner is not None and self._scanner.isRunning():
+            self._scanner.cancel()
+            self.status_lbl.setText("Stopping scan…")
+
+    def _on_scan_found(self, job: Job) -> None:
+        # Append one game + one table row (no full rebuild) — keeps it snappy
+        # even when hundreds of games stream in.
+        self.jobs.append(job)
+        if self.stack.currentIndex() != 1:
+            self.stack.setCurrentIndex(1)
+        self._append_row(job)
+
+    def _on_scan_progress(self, count: int, name: str) -> None:
+        self.status_lbl.setText(f"Scanning… {count} game(s) found  ·  {name}")
+        self._refresh_stats()
+
+    def _on_scan_done(self, n: int, cancelled: bool) -> None:
+        self._set_scanning(False)
+        self._refresh_stats()
+        if n == 0:
+            self.status_lbl.setText("No game dumps found.")
+            self._log("No folders containing eboot.bin or sce_sys were found "
+                      "(try increasing the depth next to Scan).\n")
+        else:
+            verb = "stopped" if cancelled else "complete"
+            self.status_lbl.setText(f"Scan {verb} — {n} game(s) added.")
+            self._log(f"Scan {verb} — {n} game(s) added.\n")
+
+    def _set_scanning(self, scanning: bool) -> None:
+        self._scanning = scanning
+        self.btn_scan.setText("■  Stop scan" if scanning else "⊕  Scan Folder")
+        self.btn_scan.setObjectName("Danger" if scanning else "")
+        self.btn_scan.style().unpolish(self.btn_scan)
+        self.btn_scan.style().polish(self.btn_scan)
+        # block the actions that mutate the list / start a pack while scanning
+        for w in (self.btn_add, self.btn_remove, self.btn_estimate,
+                  self.btn_history, self.btn_clear, self.btn_start,
+                  self.btn_start_sel):
+            w.setEnabled(not scanning)
 
     def on_remove_selected(self) -> None:
-        if self.runner.running:
+        if self.runner.running or self._scanning:
             return
         rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
         for r in rows:
@@ -527,7 +616,7 @@ class Ps5CompressTab(QWidget):
         self._rebuild_table()
 
     def on_clear(self) -> None:
-        if self.runner.running:
+        if self.runner.running or self._scanning:
             return
         self.jobs.clear()
         self.estimates.clear()
@@ -975,35 +1064,14 @@ class Ps5CompressTab(QWidget):
 
     def dropEvent(self, e: QDropEvent) -> None:
         self._set_drop_active(False)
-        if self.runner.running:
+        if self.runner.running or self._scanning:
             return
-        depth = self.scan_depth.value()
-        targets: list[str] = []
-        non_games: list[str] = []
-        for u in e.mimeData().urls():
-            p = u.toLocalFile()
-            if not Path(p).is_dir():
-                continue
-            if Job(source_dir=p).looks_like_game():
-                targets.append(p)
-            else:
-                # Not a game itself — search inside it like Scan Folder does.
-                found = find_game_dirs(p, max_depth=depth)
-                targets.extend(found)
-                if not found:
-                    non_games.append(p)
-
-        added = sum(1 for d in targets if self._add_job(d))
-        if added:
-            self._rebuild_table()
-            self._log(f"Added {added} game(s) via drag & drop.\n")
-        if non_games and not added:
-            names = ", ".join(Path(p).name for p in non_games)
-            self._log(f"Ignored (no game dump found within depth {depth}): {names}\n")
-            QMessageBox.information(self, "No games found",
-                f"No folders containing eboot.bin or sce_sys were found within "
-                f"{depth} level(s) of what you dropped.\n\n"
-                "Drop a game folder directly, or raise the depth next to Scan.")
+        # Scan whatever was dropped on a background thread (the worker finds
+        # games inside a parent folder, or takes a dropped game folder directly).
+        roots = [u.toLocalFile() for u in e.mimeData().urls()
+                 if Path(u.toLocalFile()).is_dir()]
+        if roots:
+            self._start_scan(roots, self.scan_depth.value())
 
     # ---- non-native multi-directory picker --------------------------------
     def _select_multiple_dirs(self) -> list[str]:
@@ -1020,3 +1088,15 @@ class Ps5CompressTab(QWidget):
         if dlg.exec():
             return dlg.selectedFiles()
         return []
+
+    # ---------------------------------------------------------------- lifecycle
+    def shutdown(self) -> None:
+        """Stop background threads cleanly when the app closes."""
+        if self._scanner is not None and self._scanner.isRunning():
+            self._scanner.cancel()
+            self._scanner.wait(2000)
+        if self._estimator is not None and self._estimator.isRunning():
+            self._estimator.stop()
+            self._estimator.wait(2000)
+        if self.runner.running:
+            self.runner.stop()

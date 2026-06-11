@@ -69,6 +69,10 @@ standalone app for Windows and macOS — no Python install required.
 
 ## 🛠️ Fixes & polish in this release
 
+- **No more UI freezing on big folders:** the PS5 compressor now scans for game dumps
+  on a background thread and adds each game as it's found (like the PKG Manager), and the
+  FTP client no longer walks a dropped folder on the UI thread before queuing it (a 22k-file
+  folder dropped in ~0.6 ms vs ~740 ms before). Both tabs stay fully responsive.
 - **Windows download flagged as a virus (false positive):** embedded a proper Windows
   version resource (CompanyName / ProductName / FileDescription) and disabled UPX packing
   so the unsigned PyInstaller build trips far fewer antivirus / SmartScreen heuristics.

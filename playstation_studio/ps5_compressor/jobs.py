@@ -67,24 +67,20 @@ def dir_is_game(path: Path) -> bool:
     return any((path / m).exists() for m in GAME_MARKERS)
 
 
-def find_game_dirs(root: str | Path, max_depth: int = 3) -> list[str]:
-    """Recursively locate game-dump folders under *root*.
+def iter_game_dirs(root: str | Path, max_depth: int = 3):
+    """Yield game-dump folders under *root* one at a time, as they're found.
 
-    Descends up to *max_depth* levels. A directory that itself looks like a
-    game is collected and **not** descended into (so we never dive into a
-    game's own ``sce_sys``). Returns a sorted list of unique absolute paths.
+    Generator form (depth-first) so a background scan thread can surface games
+    progressively instead of blocking while the whole tree is walked. A folder
+    that itself looks like a game is yielded and **not** descended into (so we
+    never dive into a game's own ``sce_sys``).
     """
     root = Path(root)
-    found: list[str] = []
-    seen: set[str] = set()
 
-    def _walk(dir_path: Path, depth: int) -> None:
+    def _walk(dir_path: Path, depth: int):
         if dir_is_game(dir_path):
-            resolved = str(dir_path.resolve())
-            if resolved not in seen:
-                seen.add(resolved)
-                found.append(resolved)
-            return  # don't descend into a game's internals
+            yield str(dir_path.resolve())
+            return
         if depth <= 0:
             return
         try:
@@ -92,10 +88,20 @@ def find_game_dirs(root: str | Path, max_depth: int = 3) -> list[str]:
         except OSError:
             return
         for child in children:
-            _walk(child, depth - 1)
+            yield from _walk(child, depth - 1)
 
-    _walk(root, max_depth)
-    return found
+    yield from _walk(root, max_depth)
+
+
+def find_game_dirs(root: str | Path, max_depth: int = 3) -> list[str]:
+    """Recursively locate game-dump folders under *root* (unique, in scan order)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for d in iter_game_dirs(root, max_depth):
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out
 
 
 # Characters illegal in Windows file names. A colon is especially dangerous: it

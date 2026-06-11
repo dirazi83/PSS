@@ -297,6 +297,7 @@ class FtpService(QThread):
     connected = Signal(bool, str)            # ok, message
     disconnected = Signal()
     listed = Signal(str, object, str)        # path, list[Entry], error
+    transfer_started = Signal(int)           # job_id (picked up by the worker)
     progress = Signal(int, int, int)         # job_id, sent, total
     transfer_done = Signal(int, bool, str)   # job_id, ok, message ("" / "cancelled")
     op_done = Signal(str, bool, str)         # op_kind, ok, message
@@ -434,6 +435,10 @@ class FtpService(QThread):
 
         self._current_job = job.job_id
         job.started = time.time()
+        # Tell the UI the worker has picked this job up — folder transfers spend
+        # time enumerating files before the first byte moves, and this keeps the
+        # row from looking stuck during that window.
+        self.transfer_started.emit(job.job_id)
 
         def cb(sent: int, total: int) -> None:
             self.progress.emit(job.job_id, sent, total or job.size)

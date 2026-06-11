@@ -149,5 +149,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         # stop background servers / threads cleanly
         self.ps4_tab.shutdown()
+        self.ps5_tab.shutdown()
         self.ftp_tab.shutdown()
         super().closeEvent(event)
