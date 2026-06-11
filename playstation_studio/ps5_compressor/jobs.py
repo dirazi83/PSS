@@ -39,6 +39,15 @@ def read_ps5_meta(folder: str) -> tuple[str, str]:
     return title, (str(icon) if icon.is_file() else "")
 
 
+def mkpfs_version() -> str:
+    """Best-effort version of the bundled MkPFS engine ("" if unavailable)."""
+    try:
+        import mkpfs
+        return getattr(mkpfs, "__version__", "") or ""
+    except Exception:        # pragma: no cover - import guard for frozen builds
+        return ""
+
+
 def mkpfs_command() -> list[str]:
     """Base command to invoke the bundled mkpfs engine.
 

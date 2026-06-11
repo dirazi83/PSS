@@ -17,7 +17,7 @@ from ..ps5_compressor.compressor_tab import Ps5CompressTab
 from ..shared.assets import app_icon, make_icon
 from ..shared.config import CONFIG_DIR
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _README = os.path.join(_PROJECT_ROOT, "README.md")
 
@@ -117,6 +117,9 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(target))
 
     def _show_about(self) -> None:
+        from ..ps5_compressor.jobs import mkpfs_version
+        engine = mkpfs_version()
+        engine_txt = f"MkPFS {engine}" if engine else "MkPFS"
         QMessageBox.about(
             self, "About PlayStation Studio",
             f"<h3>PlayStation Studio</h3>"
@@ -131,7 +134,7 @@ class MainWindow(QMainWindow):
             "<p style='color:#9aa0b4'>Built with Python &amp; PySide6.</p>"
             "<hr><p><b>Credits</b></p>"
             "<ul>"
-            "<li>PS5 compression engine: <b>MkPFS</b> by PSBrew — "
+            f"<li>PS5 compression engine: <b>{engine_txt}</b> by PSBrew — "
             "<a href='https://github.com/PSBrew/MkPFS'>github.com/PSBrew/MkPFS</a></li>"
             "<li>Inspired by <b>PS5-FFPFSC-PRO</b> by KINGDKAK — "
             "<a href='https://github.com/KINGDKAK/PS5-FFPFSC-PRO'>"

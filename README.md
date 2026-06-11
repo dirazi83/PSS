@@ -6,7 +6,7 @@
 
 ### All-in-one toolkit for PS4 / PS5 homebrew — FTP client, payload sender, PKG manager & PFS compressor
 
-**Version 1.0.0 — Initial Release**
+**Version 1.0.1**  ·  Powered by [MkPFS 0.0.8](https://github.com/PSBrew/MkPFS)
 
 A modern, cross-platform desktop application built with Python and PySide6. PlayStation
 Studio brings a dual-pane FTP client, a network payload sender, a PKG library
@@ -146,7 +146,7 @@ not specific to this app. The source is fully public, so you can read or build i
   (or add the extracted folder to **Exclusions**).
 
 **Verify it's the real file** with the SHA-256 checksums on the
-[Releases page](https://github.com/dirazi83/PSS/releases/tag/v1.0.0)
+[Releases page](https://github.com/dirazi83/PSS/releases/latest)
 (`certutil -hashfile "PlayStation Studio.exe" SHA256` on Windows, `shasum -a 256` on macOS).
 
 If your antivirus still blocks it, report the false positive (vendors usually whitelist
@@ -508,6 +508,18 @@ For source runs, confirm Python 3.8+ and that `pip install -r requirements.txt` 
 
 ## 17. Changelog
 
+### v1.0.1
+
+- **Updated the PS5 compression engine to [MkPFS 0.0.8](https://github.com/PSBrew/MkPFS)**
+  (was 0.0.5). This brings the upstream fix for **corrupted PFS images on large game
+  folders** (wrong inode mapping after `flat_path_table` collisions), **streaming pack by
+  default** (less temp-disk usage), **faster post-pack verification**, better handling of
+  special characters and non-ASCII filenames, and improved stability on network volumes.
+- The bundled engine version is now shown in the app (PS5 tab footer and About box).
+- Includes the recent reliability work: async game scanning and non-blocking FTP folder
+  drops (no UI freezing), Windows filename sanitisation, the ShadowMountPlus-compatible
+  option, Compress Selected, and antivirus / SmartScreen false-positive mitigations.
+
 ### v1.0.0 — Initial Release
 
 The first official public release of PlayStation Studio.
@@ -537,7 +549,7 @@ The first official public release of PlayStation Studio.
   progress and HTTP Range support.
 
 **PS5 PFS Compressor**
-- Batch compression via the bundled MkPFS engine with per-game progress and ratings.
+- Batch compression via the bundled **MkPFS 0.0.8** engine with per-game progress and ratings.
 - **Compress All** or **Compress Selected** — pack the whole list or just the games you pick.
 - **ShadowMountPlus compatible** (optional, off by default) — turn it on to build images
   with a ≥32 KiB block that mount cleanly under

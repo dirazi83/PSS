@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
 from .estimate import Estimate, EstimatorThread, compression_rating
 from . import history
 from .jobs import (
-    Job, PackSettings, Status, iter_game_dirs, SHADOWMOUNT_MIN_BLOCK,
+    Job, PackSettings, Status, iter_game_dirs, mkpfs_version,
+    SHADOWMOUNT_MIN_BLOCK,
 )
 from .runner import BatchRunner
 from ..shared.config import config
@@ -363,8 +364,11 @@ class Ps5CompressTab(QWidget):
         self._on_shadowmount_toggle(self.cb_shadowmount.isChecked())
 
         lay.addStretch(1)
-        credit = QLabel('Compression engine: <a href="https://github.com/PSBrew/MkPFS">'
-                        'MkPFS</a> by PSBrew')
+        _ver = mkpfs_version()
+        _vtxt = f" {_ver}" if _ver else ""
+        credit = QLabel('Compression engine: '
+                        f'<a href="https://github.com/PSBrew/MkPFS">MkPFS{_vtxt}</a>'
+                        ' by PSBrew')
         credit.setOpenExternalLinks(True)
         credit.setStyleSheet(f"color:{Palette.text_faint}; font-size:11px;")
         lay.addWidget(credit)
