@@ -150,11 +150,19 @@ class FtpEngine:
             self.ftp.storbinary(f"STOR {remote}", fh, blocksize=65536, callback=cb)
 
     # ---- recursive tree walks (folder transfers) ----
-    def walk_remote(self, root: str) -> tuple[list[str], list[tuple[str, int]]]:
+    def walk_remote(self, root: str, scan_cb=None,
+                    need_sizes: bool = True) -> tuple[list[str], list[tuple[str, int]]]:
         """Return ``(dirs, files)`` under *root* (depth-first).
 
         ``dirs`` are remote directory paths in creation order; ``files`` are
         ``(remote_path, size)`` tuples.
+
+        ``need_sizes`` controls whether a per-file SIZE command is issued when
+        the directory listing didn't already include a size. Callers that don't
+        need sizes (e.g. recursive delete) pass ``False`` to avoid an extra
+        round-trip per file — a big speed-up on large trees over the network.
+        ``scan_cb(items_seen)`` is called after each directory is listed so the
+        UI can show scan progress.
         """
         dirs: list[str] = []
         files: list[tuple[str, int]] = []
@@ -166,8 +174,12 @@ class FtpEngine:
                 if e.is_dir:
                     dirs.append(full)
                     stack.append(full)
-                else:
+                elif need_sizes:
                     files.append((full, e.size or self.size(full)))
+                else:
+                    files.append((full, e.size or 0))
+            if scan_cb is not None:
+                scan_cb(len(dirs) + len(files))
         return dirs, files
 
     def remote_tree_size(self, root: str) -> int:
@@ -251,20 +263,35 @@ class FtpEngine:
         else:
             self.ftp.delete(path)
 
-    def delete_recursive(self, path: str) -> None:
-        """Remove a directory and everything inside it (depth-first)."""
-        dirs, files = self.walk_remote(path)
+    def delete_recursive(self, path: str, progress_cb=None, scan_cb=None) -> None:
+        """Remove a directory and everything inside it (depth-first).
+
+        ``scan_cb(items_seen)`` is called while enumerating the tree;
+        ``progress_cb(done, total)`` is called as items are removed, so the UI
+        can show live progress on a big folder.
+        """
+        dirs, files = self.walk_remote(path, scan_cb=scan_cb, need_sizes=False)
+        total = len(files) + len(dirs) + 1
+        done = 0
         for f, _s in files:
             try:
                 self.ftp.delete(f)
             except ftplib.all_errors:
                 pass
+            done += 1
+            if progress_cb is not None:
+                progress_cb(done, total)
         for d in sorted(dirs, key=len, reverse=True):    # deepest first
             try:
                 self.ftp.rmd(d)
             except ftplib.all_errors:
                 pass
+            done += 1
+            if progress_cb is not None:
+                progress_cb(done, total)
         self.ftp.rmd(path)
+        if progress_cb is not None:
+            progress_cb(total, total)
 
     def rename(self, src: str, dst: str) -> None:
         self.ftp.rename(src, dst)
@@ -301,6 +328,7 @@ class FtpService(QThread):
     progress = Signal(int, int, int)         # job_id, sent, total
     transfer_done = Signal(int, bool, str)   # job_id, ok, message ("" / "cancelled")
     op_done = Signal(str, bool, str)         # op_kind, ok, message
+    op_progress = Signal(str)                # live status line for a running op ("" clears)
     log = Signal(str)
 
     def __init__(self, parent=None) -> None:
@@ -401,10 +429,21 @@ class FtpService(QThread):
             self.op_done.emit("mkdir", True, op["path"])
             self.submit("list", path=posixpath.dirname(op["path"].rstrip("/")) or "/")
         elif kind == "delete":
+            name = posixpath.basename(op["path"].rstrip("/")) or op["path"]
             if op.get("recursive") and op["is_dir"]:
-                self._engine.delete_recursive(op["path"])
+                self.op_progress.emit(f"Scanning {name}…")
+                # throttle: emit roughly every 20 removals + the final one, so a
+                # huge folder doesn't flood the UI with thousands of signals.
+                self._engine.delete_recursive(
+                    op["path"],
+                    progress_cb=lambda d, t: (d % 20 == 0 or d == t)
+                    and self.op_progress.emit(f"Deleting {name}…  {d}/{t}"),
+                    scan_cb=lambda n: self.op_progress.emit(
+                        f"Scanning {name}…  {n} items found"))
             else:
+                self.op_progress.emit(f"Deleting {name}…")
                 self._engine.delete(op["path"], op["is_dir"])
+            self.op_progress.emit("")
             self.log.emit(f"Deleted: {op['path']}")
             self.op_done.emit("delete", True, op["path"])
             self.submit("list", path=op["parent"])

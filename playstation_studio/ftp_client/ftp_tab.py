@@ -351,7 +351,22 @@ class FtpClientTab(QWidget):
         self.service.progress.connect(self._on_progress)
         self.service.transfer_done.connect(self._on_transfer_done)
         self.service.op_done.connect(self._on_op_done)
+        self.service.op_progress.connect(self._on_op_progress)
         self.service.log.connect(self._log)
+
+    # ---- live operation status (delete, etc.) ----
+    def _on_op_progress(self, text: str) -> None:
+        if text:
+            self.status.setText(text)
+        else:
+            self._restore_status()
+
+    def _restore_status(self) -> None:
+        if self._connected:
+            site = getattr(self, "_pending_site", None)
+            self.status.setText(f"Connected · {site.host}" if site else "Connected")
+        else:
+            self.status.setText("Not connected")
 
     # ---- connection ----
     def _reload_sites(self) -> None:
@@ -678,6 +693,9 @@ class FtpClientTab(QWidget):
         sel = self._selected_remote()
         if not sel or not self._confirm_delete(sel, "remote"):
             return
+        # Instant feedback — the worker then streams live "Deleting… n/total".
+        self.status.setText(f"Deleting {len(sel)} item(s)…")
+        self._log(f"Deleting {len(sel)} remote item(s)…")
         for e in sel:
             self.service.submit(
                 "delete", path=posixpath.join(self.remote_cwd, e.name),
@@ -729,6 +747,8 @@ class FtpClientTab(QWidget):
         ) == QMessageBox.Yes
 
     def _on_op_done(self, kind: str, ok: bool, message: str) -> None:
+        if kind == "delete":
+            self._restore_status()    # clear the live "Deleting…" line
         if not ok:
             QMessageBox.warning(self, f"{kind} failed", message)
         elif kind == "raw":
