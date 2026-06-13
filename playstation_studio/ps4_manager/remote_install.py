@@ -380,16 +380,27 @@ class RemoteInstaller(QThread):
             # with a non-2xx code — read it so we can show the real reason.
             return self._parse_rpi(e.read().decode("utf-8", "ignore"))
 
-    def _hint(self, reason: str) -> None:
-        """Surface the most common PS4-side causes when an install is rejected."""
-        low = (reason or "").lower()
-        if "space" in low or "free" in low or "0x80990015" in low:
-            self.log.emit("   ↳ The PS4 likely doesn't have enough free space "
-                          "for this package.")
-        elif ("content type" in low or "prerequisites" in low
-              or "title" in low or "format" in low or "sfo" in low):
-            self.log.emit("   ↳ The file may be corrupt or not a valid PS4 "
-                          "package for this firmware.")
+    # Known Remote PKG Installer / bgft rejection codes, mapped from observed
+    # console behaviour with flatz' installer.
+    _RPI_ERRORS = {
+        0x80990015: "It's already installed on the PS4 — delete the existing "
+                    "copy to reinstall the base game, or just install the "
+                    "update / DLC on top.",
+        0x80990004: "Its base game/app isn't installed yet — install the base "
+                    "package first (this looks like an update or DLC).",
+    }
+
+    def _explain_code(self, code) -> str:
+        """Friendly explanation for a console error code, or '' if unknown."""
+        if isinstance(code, int):
+            return self._RPI_ERRORS.get(code & 0xFFFFFFFF, "")
+        return ""
+
+    def _emit_hint(self, code) -> None:
+        """Log the known explanation for ``code`` or a generic checklist."""
+        explain = self._explain_code(code)
+        if explain:
+            self.log.emit(f"   ↳ {explain}")
         else:
             self.log.emit("   ↳ Check: PS4 free space, that the package matches "
                           "your console's firmware, and that the HTTP server "
@@ -405,9 +416,13 @@ class RemoteInstaller(QThread):
         # The PS4 reports *why* it refused a package — surface it instead of a
         # bare "Failed". A success reply has status=success + a task_id.
         if resp.get("status") != "success" or "task_id" not in resp:
-            reason = resp.get("error") or "PS4 rejected the package (no task id)"
-            self.log.emit(f"✗ {name}: {reason}")
-            self._hint(reason)
+            code = resp.get("error_code")
+            if isinstance(code, int):
+                head = f"PS4 refused it [0x{code & 0xFFFFFFFF:08X}]"
+            else:
+                head = resp.get("error") or "PS4 rejected the package (no task id)"
+            self.log.emit(f"✗ {name}: {head}")
+            self._emit_hint(code)
             self.progress.emit(index, "Failed", 0)
             return
         try:
@@ -434,7 +449,7 @@ class RemoteInstaller(QThread):
             if err:
                 code = err & 0xFFFFFFFF
                 self.log.emit(f"✗ {name}: PS4 install error 0x{code:08X}")
-                self._hint(f"0x{code:08X}")
+                self._emit_hint(code)
                 self.progress.emit(index, "Failed", 0)
                 break
             transferred = int(st.get("transferred", 0))
