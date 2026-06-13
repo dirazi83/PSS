@@ -519,6 +519,12 @@ For source runs, confirm Python 3.8+ and that `pip install -r requirements.txt` 
 - Includes the recent reliability work: async game scanning and non-blocking FTP folder
   drops (no UI freezing), Windows filename sanitisation, the ShadowMountPlus-compatible
   option, Compress Selected, and antivirus / SmartScreen false-positive mitigations.
+- **PS4 remote install reliability:** the package HTTP server now speaks **HTTP/1.1** with
+  keep-alive and clean byte-range framing, matching the on-console client of flatz's
+  [ps4_remote_pkg_installer](https://github.com/flatz/ps4_remote_pkg_installer). The previous
+  HTTP/1.0 server could desync the PS4 while it read the package header, which surfaced as
+  the unhelpful *"Unable to set up prerequisites."* Rejected installs also report the
+  **console's actual error reason** now, instead of a bare "Failed".
 
 ### v1.0.0 — Initial Release
 
@@ -654,8 +660,10 @@ Every connection event, transfer and operation is recorded in the per-tab activi
 - **PS5 compression engine:** [MkPFS](https://github.com/PSBrew/MkPFS) by **PSBrew**
   (bundled in `MkPFS/`, GPLv3). The PS5 PFS Compressor is a front-end over MkPFS.
 - Inspired by [PS5-FFPFSC-PRO](https://github.com/KINGDKAK/PS5-FFPFSC-PRO) by **KINGDKAK**.
-- **PS4 remote install:** implements the JSON `:12800` API of
-  [ps4_remote_pkg_installer](https://github.com/flatz/ps4_remote_pkg_installer) by **flatz**.
+- **PS4 remote install:** speaks the JSON `:12800` API of
+  [**ps4_remote_pkg_installer**](https://github.com/flatz/ps4_remote_pkg_installer) by
+  **flatz**, and serves packages over HTTP/1.1 + byte-range exactly the way that installer's
+  on-console client expects. Full credit to flatz for the protocol and reference client.
 - PS5 remote install uses **etaHEN** DPI.
 - Built with **Python** and **PySide6 (Qt)**.
 

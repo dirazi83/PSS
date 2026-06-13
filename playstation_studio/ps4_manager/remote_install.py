@@ -47,12 +47,28 @@ def method_api_port(method: str) -> int:
 
 
 class _PkgHttpHandler(SimpleHTTPRequestHandler):
-    """Quiet static handler with HTTP Range (206) support.
+    """Quiet static handler with HTTP/1.1 keep-alive + Range (206) support.
 
-    PS4/PS5 background download managers request packages in byte ranges;
-    the stdlib handler ignores ``Range`` and always returns 200 + the whole
-    file, which makes console installs stall. This adds proper 206/416.
+    The PS4 Remote PKG Installer (flatz) reads a package over a single
+    ``SCE_HTTP_VERSION_1_1`` keep-alive connection: first the header at
+    offset 0 with *no* ``Range`` (it reads only the header bytes and abandons
+    the rest of the body), then ranged reads of the entry table, ``param.sfo``
+    and ``icon0.png``. A plain HTTP/1.0 server — the stdlib default — desyncs
+    that client when it abandons the big header response, so the follow-up
+    ranged read fails and the console reports the unhelpful
+    *"Unable to set up prerequisites"* with no reason.
+
+    This handler therefore:
+      * speaks **HTTP/1.1** (the version the console negotiates),
+      * keep-alives the small ranged reads (206), but
+      * sends ``Connection: close`` after a full-file (200) stream the client
+        may abandon, so the connection can never desync,
+      * always sends an exact ``Content-Length`` so framing is unambiguous.
     """
+
+    # The console's sceHttp client is HTTP/1.1; match it so keep-alive and
+    # range framing behave the way flatz's installer expects.
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, *args) -> None:
         pass
@@ -61,6 +77,16 @@ class _PkgHttpHandler(SimpleHTTPRequestHandler):
         # advertise range support on every response
         self.send_header("Accept-Ranges", "bytes")
         super().end_headers()
+
+    def do_HEAD(self) -> None:
+        path = self.translate_path(self.path)
+        if not os.path.isfile(path):
+            self.send_error(404, "File not found")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", self.guess_type(path))
+        self.send_header("Content-Length", str(os.path.getsize(path)))
+        self.end_headers()
 
     def do_GET(self) -> None:
         path = self.translate_path(self.path)
@@ -89,6 +115,8 @@ class _PkgHttpHandler(SimpleHTTPRequestHandler):
             except ValueError:
                 self.send_response(416)
                 self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.close_connection = True
                 self.end_headers()
                 return
         length = end - start + 1
@@ -97,6 +125,12 @@ class _PkgHttpHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(length))
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        else:
+            # A non-ranged GET streams the whole file, but the console reads
+            # only the header and abandons the rest. Close afterwards so the
+            # next request starts fresh instead of desyncing keep-alive.
+            self.close_connection = True
+            self.send_header("Connection", "close")
         self.end_headers()
         rel = urllib.parse.unquote(self.path.split("?", 1)[0])
         owner = getattr(self.server, "owner", None)
@@ -110,6 +144,9 @@ class _PkgHttpHandler(SimpleHTTPRequestHandler):
                 try:
                     self.wfile.write(chunk)
                 except (BrokenPipeError, ConnectionResetError):
+                    # client hung up early (expected when it abandons the
+                    # header read) — drop this connection, never reuse it
+                    self.close_connection = True
                     break
                 remaining -= len(chunk)
                 if owner is not None:
