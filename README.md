@@ -519,12 +519,15 @@ For source runs, confirm Python 3.8+ and that `pip install -r requirements.txt` 
 - Includes the recent reliability work: async game scanning and non-blocking FTP folder
   drops (no UI freezing), Windows filename sanitisation, the ShadowMountPlus-compatible
   option, Compress Selected, and antivirus / SmartScreen false-positive mitigations.
-- **PS4 remote install reliability:** the package HTTP server now speaks **HTTP/1.1** with
-  keep-alive and clean byte-range framing, matching the on-console client of flatz's
-  [ps4_remote_pkg_installer](https://github.com/flatz/ps4_remote_pkg_installer). The previous
-  HTTP/1.0 server could desync the PS4 while it read the package header, which surfaced as
-  the unhelpful *"Unable to set up prerequisites."* Rejected installs also report the
-  **console's actual error reason** now, instead of a bare "Failed".
+- **PS4 remote install — fixed _"Unable to set up prerequisites"_:** packages are now served
+  under an ASCII-safe `/p/<hex>.pkg` alias. flatz's
+  [installer](https://github.com/flatz/ps4_remote_pkg_installer) *unescapes* the URL before
+  handing it to the console's HTTP client, so a filename containing spaces, `()`, `{}` or `™`
+  became an invalid URL the PS4 couldn't even open — every such title failed before
+  connecting. The hex alias survives unescaping and the server decodes it back to the real
+  file. The package HTTP server also now speaks **HTTP/1.1** with keep-alive, matching the
+  console's client and the way it reads the package header, and rejected installs report the
+  **console's actual error reason** instead of a bare "Failed".
 
 ### v1.0.0 — Initial Release
 

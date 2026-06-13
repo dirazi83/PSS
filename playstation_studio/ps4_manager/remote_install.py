@@ -14,6 +14,7 @@ import datetime
 import functools
 import json
 import os
+import re
 import socket
 import threading
 import time
@@ -44,6 +45,17 @@ INSTALL_METHODS = [
 
 def method_api_port(method: str) -> int:
     return DPI_V1_PORT if method == METHOD_PS5_DPI_V1 else 12800
+
+
+# Packages are exposed under /p/<hex>.pkg — an ASCII-safe, reversible alias so
+# the console never receives a URL with spaces or special characters.
+_PKG_ALIAS_RE = re.compile(r"^/p/([0-9a-fA-F]+)\.pkg$")
+
+
+def pkg_alias_url(server_ip: str, server_port: int, rel_path: str) -> str:
+    """Build the safe ``http://ip:port/p/<hex>.pkg`` URL for a relative path."""
+    token = rel_path.replace(os.sep, "/").encode("utf-8").hex()
+    return f"http://{server_ip}:{server_port}/p/{token}.pkg"
 
 
 class _PkgHttpHandler(SimpleHTTPRequestHandler):
@@ -78,9 +90,40 @@ class _PkgHttpHandler(SimpleHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         super().end_headers()
 
+    def _resolve(self):
+        """Map the request path to a real file + its human relative path.
+
+        Packages are served under an ASCII-safe alias ``/p/<hex>.pkg`` where
+        ``<hex>`` is the hex-encoded relative path. flatz's installer *unescapes*
+        the URL before handing it to ``sceHttp``, so a normal percent-encoded
+        path containing spaces / ``()`` / ``{}`` / ``™`` becomes an invalid URL
+        and the console can't even open the connection — surfacing as
+        *"Unable to set up prerequisites."* The hex alias contains only
+        ``[0-9a-f/]`` so it survives unescaping intact and always parses.
+
+        Returns ``(real_path, rel)`` where ``rel`` is the leading-slash human
+        path used for progress reporting, or ``(None, raw)`` on a bad/unsafe
+        alias. Non-alias requests fall back to the normal directory mapping
+        (used by the bundled exploit host).
+        """
+        raw = urllib.parse.unquote(self.path.split("?", 1)[0])
+        m = _PKG_ALIAS_RE.match(raw)
+        if not m:
+            return self.translate_path(self.path), raw
+        try:
+            rel = bytes.fromhex(m.group(1)).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None, raw
+        base = os.path.realpath(self.directory)
+        real = os.path.realpath(os.path.join(base, rel.replace("/", os.sep)))
+        # never let a crafted alias escape the served directory
+        if real != base and not real.startswith(base + os.sep):
+            return None, raw
+        return real, "/" + rel
+
     def do_HEAD(self) -> None:
-        path = self.translate_path(self.path)
-        if not os.path.isfile(path):
+        path, _ = self._resolve()
+        if not path or not os.path.isfile(path):
             self.send_error(404, "File not found")
             return
         self.send_response(200)
@@ -89,7 +132,10 @@ class _PkgHttpHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        path = self.translate_path(self.path)
+        path, rel = self._resolve()
+        if path is None:
+            self.send_error(404, "File not found")
+            return
         if os.path.isdir(path):
             return super().do_GET()
         if not os.path.isfile(path):
@@ -132,7 +178,6 @@ class _PkgHttpHandler(SimpleHTTPRequestHandler):
             self.close_connection = True
             self.send_header("Connection", "close")
         self.end_headers()
-        rel = urllib.parse.unquote(self.path.split("?", 1)[0])
         owner = getattr(self.server, "owner", None)
         with open(path, "rb") as f:
             f.seek(start)
@@ -272,11 +317,17 @@ class RemoteInstaller(QThread):
         self.method = method
 
     def _url_for(self, pkg_path: str) -> str:
-        """URL the console will download from — path segments are
-        percent-encoded so filenames with spaces / () / ™ work."""
-        rel = os.path.relpath(pkg_path, self.served_root).replace(os.sep, "/")
-        enc = "/".join(urllib.parse.quote(seg) for seg in rel.split("/"))
-        return f"http://{self.server_ip}:{self.server_port}/{enc}"
+        """URL the console downloads from.
+
+        Uses the ASCII-safe ``/p/<hex>.pkg`` alias rather than the percent-
+        encoded real path. flatz's installer unescapes the URL before handing
+        it to the console's HTTP client, so spaces / ``()`` / ``{}`` / ``™`` in
+        the filename would make an invalid URL the PS4 can't open (it fails
+        before connecting, as *"Unable to set up prerequisites"*). The hex alias
+        survives unescaping and the server decodes it back to the real file.
+        """
+        rel = os.path.relpath(pkg_path, self.served_root)
+        return pkg_alias_url(self.server_ip, self.server_port, rel)
 
     # ------------------------------------------------------------------ run
     def run(self) -> None:
