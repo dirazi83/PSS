@@ -224,8 +224,7 @@ class Ps4LibraryTab(QWidget):
         self.btn_install.clicked.connect(self.on_install_all)
         btn_clear = QPushButton("Clear")
         btn_clear.setObjectName("Ghost")
-        btn_clear.clicked.connect(lambda: self.install_model.removeRows(
-            0, self.install_model.rowCount()))
+        btn_clear.clicked.connect(self._clear_install)
         row.addStretch(1)
         row.addWidget(btn_clear)
         row.addWidget(self.btn_install)
@@ -515,6 +514,27 @@ class Ps4LibraryTab(QWidget):
             if self.install_model.item(r, 6).text() == np:
                 self.install_model.removeRow(r)
                 return
+
+    def _clear_install(self) -> None:
+        """Empty the install queue *and* untick every selected package."""
+        # Uncheck across all category lists. Suppress the game→update/DLC
+        # re-sync while we do it (we're clearing everything anyway).
+        self._syncing = True
+        try:
+            for model in self.models.values():
+                for r in range(model.rowCount()):
+                    cell = model.item(r, 0)
+                    if cell is not None and cell.checkState() != Qt.Unchecked:
+                        cell.setCheckState(Qt.Unchecked)
+        finally:
+            self._syncing = False
+        # belt-and-braces: drop any rows left in the queue
+        self.install_model.removeRows(0, self.install_model.rowCount())
+        # reset the per-list "Select all" toggle too
+        self.cb_all.blockSignals(True)
+        self.cb_all.setChecked(False)
+        self.cb_all.blockSignals(False)
+        self._refresh_counts()
 
     def on_rename(self) -> None:
         root = self.path_edit.text().strip()
