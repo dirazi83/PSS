@@ -417,6 +417,13 @@ class RemoteInstaller(QThread):
         # bare "Failed". A success reply has status=success + a task_id.
         if resp.get("status") != "success" or "task_id" not in resp:
             code = resp.get("error_code")
+            ucode = (code & 0xFFFFFFFF) if isinstance(code, int) else None
+            if ucode == 0x80990015:
+                # "already installed" is an expected state, not a failure —
+                # show the row as done rather than a red ✗ / Failed.
+                self.log.emit(f"✓ {name}: already installed on the PS4")
+                self.progress.emit(index, "Already installed", 100)
+                return
             if isinstance(code, int):
                 head = f"PS4 refused it [0x{code & 0xFFFFFFFF:08X}]"
             else:
