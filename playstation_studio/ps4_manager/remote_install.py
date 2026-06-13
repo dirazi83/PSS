@@ -262,28 +262,92 @@ class RemoteInstaller(QThread):
         self.finished_all.emit()
 
     # ---- PS4 Remote PKG Installer (JSON API on :12800, with progress) ----
+    # Protocol & response schema per flatz' ps4_remote_pkg_installer:
+    # https://github.com/flatz/ps4_remote_pkg_installer
+    @staticmethod
+    def _parse_rpi(raw: str) -> dict:
+        """Parse a Remote PKG Installer reply.
+
+        The installer emits responses whose numeric fields are hex integer
+        *literals* (e.g. ``"transferred": 0x1A2B``) — valid Python but invalid
+        JSON, so ``json.loads`` can't read them and we use ``ast.literal_eval``
+        instead. Returns ``{}`` when the body can't be parsed.
+        """
+        try:
+            out = ast.literal_eval(raw.replace("\n", "").strip())
+        except (ValueError, SyntaxError):
+            return {}
+        return out if isinstance(out, dict) else {}
+
     def _post(self, endpoint: str, payload: dict) -> dict:
         url = f"http://{self.ps4_ip}:{PS4_API_PORT}/api/{endpoint}"
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             url, data, headers={"Content-Type": "application/json"})
-        resp = urllib.request.urlopen(req, timeout=15)
-        return ast.literal_eval(resp.read().decode("utf-8").replace("\n", ""))
+        try:
+            resp = urllib.request.urlopen(req, timeout=15)
+            return self._parse_rpi(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            # The installer returns its {"status":"fail","error":…} body even
+            # with a non-2xx code — read it so we can show the real reason.
+            return self._parse_rpi(e.read().decode("utf-8", "ignore"))
+
+    def _hint(self, reason: str) -> None:
+        """Surface the most common PS4-side causes when an install is rejected."""
+        low = (reason or "").lower()
+        if "space" in low or "free" in low or "0x80990015" in low:
+            self.log.emit("   ↳ The PS4 likely doesn't have enough free space "
+                          "for this package.")
+        elif ("content type" in low or "prerequisites" in low
+              or "title" in low or "format" in low or "sfo" in low):
+            self.log.emit("   ↳ The file may be corrupt or not a valid PS4 "
+                          "package for this firmware.")
+        else:
+            self.log.emit("   ↳ Check: PS4 free space, that the package matches "
+                          "your console's firmware, and that the HTTP server "
+                          "stays running for the whole download.")
 
     def _install_ps4_rpi(self, index: int, url: str, name: str) -> None:
         try:
             resp = self._post("install", {"type": "direct", "packages": [url]})
-            task_id = int(resp["task_id"])
-        except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
-            self.log.emit(f"✗ {name}: {e}")
+        except (urllib.error.URLError, OSError) as e:
+            self.log.emit(f"✗ {name}: cannot reach PS4 ({e})")
             self.progress.emit(index, "Failed", 0)
             return
-        self.log.emit(f"Installing {name}")
+        # The PS4 reports *why* it refused a package — surface it instead of a
+        # bare "Failed". A success reply has status=success + a task_id.
+        if resp.get("status") != "success" or "task_id" not in resp:
+            reason = resp.get("error") or "PS4 rejected the package (no task id)"
+            self.log.emit(f"✗ {name}: {reason}")
+            self._hint(reason)
+            self.progress.emit(index, "Failed", 0)
+            return
+        try:
+            task_id = int(resp["task_id"])
+        except (TypeError, ValueError):
+            self.log.emit(f"✗ {name}: invalid task id {resp.get('task_id')!r}")
+            self.progress.emit(index, "Failed", 0)
+            return
+        self.log.emit(f"Installing {resp.get('title') or name}")
         while True:
             try:
                 st = self._post("get_task_progress", {"task_id": task_id})
-            except (urllib.error.URLError, OSError, ValueError) as e:
+            except (urllib.error.URLError, OSError) as e:
                 self.log.emit(f"… progress error: {e}")
+                self.progress.emit(index, "Failed", 0)
+                break
+            if not st:
+                self.log.emit(f"✗ {name}: no progress response from PS4")
+                self.progress.emit(index, "Failed", 0)
+                break
+            # A non-zero error means the install died mid-download (e.g. the
+            # console ran out of space or the connection dropped).
+            err = int(st.get("error", 0) or 0)
+            if err:
+                code = err & 0xFFFFFFFF
+                self.log.emit(f"✗ {name}: PS4 install error 0x{code:08X}")
+                self._hint(f"0x{code:08X}")
+                self.progress.emit(index, "Failed", 0)
                 break
             transferred = int(st.get("transferred", 0))
             total = int(st.get("length_total", 0)) or 1

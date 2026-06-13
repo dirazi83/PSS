@@ -31,3 +31,6 @@ Thumbs.db
 *.ffpfsc
 .pss_tmp/
 .DS_Store
+
+# graphify knowledge-graph output (generated)
+graphify-out/

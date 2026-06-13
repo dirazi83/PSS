@@ -654,7 +654,9 @@ Every connection event, transfer and operation is recorded in the per-tab activi
 - **PS5 compression engine:** [MkPFS](https://github.com/PSBrew/MkPFS) by **PSBrew**
   (bundled in `MkPFS/`, GPLv3). The PS5 PFS Compressor is a front-end over MkPFS.
 - Inspired by [PS5-FFPFSC-PRO](https://github.com/KINGDKAK/PS5-FFPFSC-PRO) by **KINGDKAK**.
-- PS5 remote install uses **etaHEN** DPI; PS4 uses the **Remote PKG Installer**.
+- **PS4 remote install:** implements the JSON `:12800` API of
+  [ps4_remote_pkg_installer](https://github.com/flatz/ps4_remote_pkg_installer) by **flatz**.
+- PS5 remote install uses **etaHEN** DPI.
 - Built with **Python** and **PySide6 (Qt)**.
 
 <div align="center">

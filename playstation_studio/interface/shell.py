@@ -139,7 +139,10 @@ class MainWindow(QMainWindow):
             "<li>Inspired by <b>PS5-FFPFSC-PRO</b> by KINGDKAK — "
             "<a href='https://github.com/KINGDKAK/PS5-FFPFSC-PRO'>"
             "github.com/KINGDKAK/PS5-FFPFSC-PRO</a></li>"
-            "<li>PS5 install: <b>etaHEN</b> DPI · PS4 install: Remote PKG Installer</li>"
+            "<li>PS5 install: <b>etaHEN</b> DPI · PS4 install: "
+            "<b>Remote PKG Installer</b> by flatz — "
+            "<a href='https://github.com/flatz/ps4_remote_pkg_installer'>"
+            "github.com/flatz/ps4_remote_pkg_installer</a></li>"
             "</ul>")
 
     # =============================================================== nav
