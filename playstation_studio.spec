@@ -82,7 +82,7 @@ if sys.platform == "darwin":
         bundle_identifier="com.playstationstudio.app",
         info_plist={
             "CFBundleName": "PlayStation Studio",
-            "CFBundleShortVersionString": "1.0.1",
+            "CFBundleShortVersionString": "1.0.2",
             "NSHighResolutionCapable": True,
         },
     )

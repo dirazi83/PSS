@@ -6,7 +6,7 @@
 
 ### All-in-one toolkit for PS4 / PS5 homebrew — FTP client, payload sender, PKG manager & PFS compressor
 
-**Version 1.0.1**  ·  Powered by [MkPFS 0.0.8](https://github.com/PSBrew/MkPFS)
+**Version 1.0.2**  ·  Powered by [MkPFS 0.0.8](https://github.com/PSBrew/MkPFS)
 
 A modern, cross-platform desktop application built with Python and PySide6. PlayStation
 Studio brings a dual-pane FTP client, a network payload sender, a PKG library
@@ -508,6 +508,24 @@ For source runs, confirm Python 3.8+ and that `pip install -r requirements.txt` 
 
 ## 17. Changelog
 
+### v1.0.2
+
+- **PS4 remote install — fixed _"Unable to set up prerequisites"_:** packages are now served
+  under an ASCII-safe `/p/<hex>.pkg` alias. flatz's
+  [installer](https://github.com/flatz/ps4_remote_pkg_installer) *unescapes* the URL before
+  handing it to the console's HTTP client, so a filename containing spaces, `()`, `{}` or `™`
+  became an invalid URL the PS4 couldn't even open — every such title failed **before
+  connecting**. The hex alias survives unescaping and the server decodes it back to the real
+  file. Verified live on a real PS4.
+- **HTTP/1.1 package server** with keep-alive — matches the console's client and the way it
+  reads the package header (it pulls the header, then ranged reads of the entry table,
+  `param.sfo` and `icon0.png`).
+- **Clear console error codes:** rejected installs now decode the PS4's code — `0x80990015`
+  shows _"already installed on the PS4"_ and is marked **Already installed** (not a red
+  failure), and updates/DLC with no base game say so — instead of a bare "Failed".
+- **PS4 Library — Clear** now also unticks every selected package and resets "Select all",
+  not just the install queue.
+
 ### v1.0.1
 
 - **Updated the PS5 compression engine to [MkPFS 0.0.8](https://github.com/PSBrew/MkPFS)**
@@ -519,16 +537,6 @@ For source runs, confirm Python 3.8+ and that `pip install -r requirements.txt` 
 - Includes the recent reliability work: async game scanning and non-blocking FTP folder
   drops (no UI freezing), Windows filename sanitisation, the ShadowMountPlus-compatible
   option, Compress Selected, and antivirus / SmartScreen false-positive mitigations.
-- **PS4 remote install — fixed _"Unable to set up prerequisites"_:** packages are now served
-  under an ASCII-safe `/p/<hex>.pkg` alias. flatz's
-  [installer](https://github.com/flatz/ps4_remote_pkg_installer) *unescapes* the URL before
-  handing it to the console's HTTP client, so a filename containing spaces, `()`, `{}` or `™`
-  became an invalid URL the PS4 couldn't even open — every such title failed before
-  connecting. The hex alias survives unescaping and the server decodes it back to the real
-  file. The package HTTP server also now speaks **HTTP/1.1** with keep-alive, matching the
-  console's client and the way it reads the package header, and rejected installs report the
-  **console's actual error reason** instead of a bare "Failed".
-
 ### v1.0.0 — Initial Release
 
 The first official public release of PlayStation Studio.
