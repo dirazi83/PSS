@@ -3,6 +3,8 @@
 # (see run.sh / README).
 PySide6-Essentials>=6.6
 openpyxl>=3.1          # PS4 library → Excel export
+certifi>=2024.2       # CA bundle for the in-app updater's HTTPS calls
+                      #   (python.org / PyInstaller builds lack a system CA store)
 
 # Optional — the app runs without these, with graceful fallbacks:
 keyring>=24            # FTP Site Manager: store passwords in the OS keyring

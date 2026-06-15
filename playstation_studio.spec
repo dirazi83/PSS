@@ -18,9 +18,10 @@ datas = [
     ("README.md", "."),
 ]
 datas += collect_data_files("mkpfs")          # the PS5 engine's data files
+datas += collect_data_files("certifi")        # CA bundle for the in-app updater
 
 # --- imports PyInstaller can't see automatically ---------------------------
-hiddenimports = collect_submodules("mkpfs") + ["PySide6.QtSvg", "openpyxl"]
+hiddenimports = collect_submodules("mkpfs") + ["PySide6.QtSvg", "openpyxl", "certifi"]
 for optional in ("keyring",):                 # only if installed
     try:
         __import__(optional)
