@@ -523,6 +523,10 @@ For source runs, confirm Python 3.8+ and that `pip install -r requirements.txt` 
   translucent glass surfaces over a dark window gradient, the SF Pro system font,
   the macOS system-blue accent, hairline separators and rounder corners. Windows
   and Linux keep the existing dark theme.
+- **In-app updater.** **Help → Check for Updates** compares your version against
+  the latest GitHub release and, on packaged builds, downloads and installs the
+  new version in place, then relaunches — no manual re-download. (From source it
+  points you at `git pull`.)
 
 ### v1.0.2
 

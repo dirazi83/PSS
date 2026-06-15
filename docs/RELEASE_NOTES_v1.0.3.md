@@ -25,6 +25,16 @@ install controls, and a modern macOS look.
   their source packages.
 - These sit alongside the existing **Install All** and **Clear**.
 
+## 🔄 In-app updater
+
+- **Help → Check for Updates** compares your running version against the latest
+  GitHub release. On packaged builds it can **download and install** the new
+  version in place (with a progress bar) and relaunch — no manual re-download.
+- macOS swaps the `.app` bundle with `ditto` (preserving symlinks + the exec
+  bit); Windows mirrors the app folder and relaunches.
+- The repo is public, so no token is embedded. From source it points you at
+  `git pull` instead.
+
 ## 🎨 Modern macOS look
 
 - On **macOS**, the app now uses a "Liquid Glass" theme: translucent glass
