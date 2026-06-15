@@ -105,6 +105,7 @@ class Ps4LibraryTab(QWidget):
         self._scanning = False
         self.scanned_root = ""
         self._installer: RemoteInstaller | None = None
+        self._installing = False     # an install run is pending or active
         self._install_bars: dict[int, QProgressBar] = {}
         self._dl_rows: dict[str, int] = {}      # served rel-path -> install row
         self._dl_start: dict[int, float] = {}   # row -> download start time
@@ -684,7 +685,7 @@ class Ps4LibraryTab(QWidget):
             b.setEnabled(enabled)
 
     def _start_install(self, rows: list[int]) -> None:
-        if self._installer is not None and self._installer.isRunning():
+        if self._installing:
             QMessageBox.information(
                 self, "Install in progress",
                 "Packages install one at a time — wait for the current run "
@@ -700,19 +701,6 @@ class Ps4LibraryTab(QWidget):
                                     "Enter your console's IP address.")
             return
         paths = [self.install_model.item(r, 6).text() for r in rows]
-        # start serving the scanned folder
-        if self._server is None:
-            self._server = FolderHttpServer(
-                self.scanned_root, self.port.value(), self)
-            self._server.started_ok.connect(
-                lambda p: self._log(f"HTTP server serving packages on port {p}"))
-            self._server.failed.connect(lambda m: self._log(f"Server: {m}"))
-            self._server.start()
-        if not self._server_wired:
-            self._server.progress.connect(self._on_download_progress)
-            self._server.completed.connect(self._on_download_complete)
-            self._server_wired = True
-        self._server.reset_counters()
 
         # map served URL path → real model row, and the installer's 0-based
         # index → real model row (so installing a subset updates the right rows).
@@ -725,16 +713,53 @@ class Ps4LibraryTab(QWidget):
             self._dl_rows["/" + rel] = r
             self.install_model.setItem(r, 4, QStandardItem("Queued"))
 
+        self._installing = True
         self._set_install_buttons(False)
+        # Build but DON'T start the installer yet. It must not talk to the
+        # console until our HTTP server is actually listening — otherwise the
+        # PS4's package-header fetch races the socket bind and fails with
+        # "Unable to set up prerequisites" (notably on Windows, where the bind
+        # is slower). The installer is started from _on_server_ready.
         self._installer = RemoteInstaller(
             self.server_ip.currentText(), paths, self.ps4_ip.text().strip(),
             self.port.value(), self.scanned_root,
             method=self.method.currentData(), parent=self)
         self._installer.log.connect(self._log)
         self._installer.progress.connect(self._on_install_progress)
-        self._installer.finished_all.connect(
-            lambda: self._set_install_buttons(True))
-        self._installer.start()
+        self._installer.finished_all.connect(self._on_install_done)
+
+        if self._server is None:
+            self._server = FolderHttpServer(
+                self.scanned_root, self.port.value(), self)
+            self._server.started_ok.connect(self._on_server_ready)
+            self._server.failed.connect(self._on_server_failed)
+            self._server.progress.connect(self._on_download_progress)
+            self._server.completed.connect(self._on_download_complete)
+            self._server_wired = True
+            self._server.start()        # installer starts in _on_server_ready
+        else:
+            self._server.reset_counters()
+            self._installer.start()
+
+    def _on_server_ready(self, port: int) -> None:
+        self._log(f"HTTP server serving packages on port {port}")
+        self._server.reset_counters()
+        if self._installing and self._installer is not None \
+                and not self._installer.isRunning():
+            self._installer.start()
+
+    def _on_server_failed(self, msg: str) -> None:
+        self._log(f"Server: {msg}")
+        if self._server is not None:
+            self._server.stop()
+        self._server = None
+        self._server_wired = False
+        self._installing = False
+        self._set_install_buttons(True)
+
+    def _on_install_done(self) -> None:
+        self._installing = False
+        self._set_install_buttons(True)
 
     def _row_bar(self, row: int) -> QProgressBar:
         bar = self._install_bars.get(row)
