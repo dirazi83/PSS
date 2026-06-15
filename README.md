@@ -6,7 +6,7 @@
 
 ### All-in-one toolkit for PS4 / PS5 homebrew — FTP client, payload sender, PKG manager & PFS compressor
 
-**Version 1.0.2**  ·  Powered by [MkPFS 0.0.8](https://github.com/PSBrew/MkPFS)
+**Version 1.0.3**  ·  Powered by [MkPFS 0.0.8](https://github.com/PSBrew/MkPFS)
 
 A modern, cross-platform desktop application built with Python and PySide6. PlayStation
 Studio brings a dual-pane FTP client, a network payload sender, a PKG library
@@ -507,6 +507,22 @@ For source runs, confirm Python 3.8+ and that `pip install -r requirements.txt` 
 ---
 
 ## 17. Changelog
+
+### v1.0.3
+
+- **Install one package at a time.** PS4 installs are now strictly sequential —
+  the next package is queued only after the previous one finishes, with a short
+  settle pause in between, because firing installs back-to-back is what crashes
+  the PS4's Remote PKG Installer. A concurrency guard stops a second run starting
+  while one is active, and installs are cancellable.
+- **Install Selected / Remove Selected.** The Install tab gains multi-row
+  selection with **Install Selected** (install just the highlighted rows) and
+  **Remove Selected** (drop rows from the queue and untick their source
+  packages), alongside Install All / Clear.
+- **Modern macOS look.** On macOS the app now uses a "Liquid Glass" theme —
+  translucent glass surfaces over a dark window gradient, the SF Pro system font,
+  the macOS system-blue accent, hairline separators and rounder corners. Windows
+  and Linux keep the existing dark theme.
 
 ### v1.0.2
 
