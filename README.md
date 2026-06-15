@@ -527,6 +527,9 @@ For source runs, confirm Python 3.8+ and that `pip install -r requirements.txt` 
   the latest GitHub release and, on packaged builds, downloads and installs the
   new version in place, then relaunches — no manual re-download. (From source it
   points you at `git pull`.)
+- **Windows install fix.** Remote installs now wait for the package HTTP server
+  to be listening before contacting the console, fixing _"Unable to set up
+  prerequisites"_ on Windows (a startup race that didn't affect macOS).
 
 ### v1.0.2
 

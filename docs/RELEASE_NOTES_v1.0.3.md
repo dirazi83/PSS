@@ -16,6 +16,9 @@ install controls, and a modern macOS look.
   console at once.
 - **Cancellable** — closing the app mid-install stops the loop cleanly instead
   of leaving a thread hammering the console.
+- **Windows fix:** the installer now waits for the package HTTP server to be
+  listening before telling the console to fetch, fixing _"Unable to set up
+  prerequisites"_ on Windows (a socket-bind race that macOS happened to win).
 
 ## ✨ Install controls
 
