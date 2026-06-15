@@ -1,10 +1,21 @@
-"""Modern dark theme: color palette + Qt style sheet."""
+"""Theme: color palette + Qt style sheet.
+
+Two palettes share one stylesheet template:
+  * ``Palette``    — the default dark theme (used on Windows / Linux).
+  * ``MacPalette`` — a modern macOS "Liquid Glass" look (translucent materials,
+                     SF Pro, system-blue accent, hairline separators, rounder
+                     corners). Applied only on macOS, from ``app.py``.
+
+Only the QSS string is generated from these palettes. Colors consumed at runtime
+by ``QColor`` (e.g. table status text) always read the base ``Palette`` hex
+values, so ``MacPalette``'s ``rgba(...)`` tokens never reach ``QColor``.
+"""
 
 from __future__ import annotations
 
 
 class Palette:
-    """Central color palette so widgets stay consistent."""
+    """Central color palette so widgets stay consistent (default dark theme)."""
 
     bg = "#0f1117"          # window background
     surface = "#171a23"     # panels / cards
@@ -25,6 +36,37 @@ class Palette:
     danger = "#ef4444"
     info = "#38bdf8"
 
+    # ---- derived/extra tokens (Windows values match the original literals) ----
+    font_stack = '"SF Pro Display", "Segoe UI", "Inter", system-ui, sans-serif'
+    mono_stack = '"Menlo", "SF Mono", "JetBrains Mono", monospace'
+
+    root_bg = bg
+    header_bg = ("qlineargradient(x1:0 y1:0, x2:1 y2:0, "
+                 "stop:0 #14172180, stop:1 #14172100)")
+
+    # solid surfaces for top-level popups (dialogs, menus, dropdowns, tooltips)
+    # which have no parent to composite a translucent fill against
+    dialog_bg = bg
+    popup_bg = surface_alt
+
+    btn_bg = surface_alt
+    btn_hover = "#232838"
+    btn_press = "#2b3142"
+    btn_disabled_bg = "#141722"
+    primary_disabled_bg = "#353a52"
+    primary_disabled_fg = "#8a8fb0"
+
+    accent_soft = "rgba(99,102,241,0.18)"   # table selection
+    accent_glow = "rgba(99,102,241,0.10)"   # row hover
+    accent_wash = "rgba(99,102,241,0.08)"   # drop-zone active
+
+    log_bg = "#0b0d13"
+
+    r_card = "14px"
+    r_btn = "10px"
+    r_input = "9px"
+    r_list = "12px"
+
     # status colors keyed by Job status name
     @classmethod
     def status_color(cls, status: str) -> str:
@@ -38,32 +80,78 @@ class Palette:
         }.get(status, cls.text_dim)
 
 
-def stylesheet() -> str:
-    p = Palette
+class MacPalette(Palette):
+    """Modern macOS look — translucent glass materials, system-blue accent,
+    hairline separators, SF Pro, rounder corners. QSS-only (see module docs)."""
+
+    bg = "#1c1c1e"
+    surface = "rgba(255,255,255,0.055)"      # frosted material
+    surface_alt = "rgba(255,255,255,0.09)"   # elevated material
+    border = "rgba(255,255,255,0.10)"        # hairline separator
+    border_focus = "#0A84FF"
+
+    text = "#f5f5f7"
+    text_dim = "rgba(235,235,245,0.62)"      # macOS secondary label
+    text_faint = "rgba(235,235,245,0.32)"    # macOS tertiary label
+
+    accent = "#0A84FF"                        # macOS system blue (dark)
+    accent_hover = "#409CFF"
+    accent_press = "#0A6CD8"
+
+    font_stack = ('"SF Pro Text", ".AppleSystemUIFont", -apple-system, '
+                  '"Helvetica Neue", sans-serif')
+    mono_stack = '"SF Mono", "Menlo", "JetBrains Mono", monospace'
+
+    dialog_bg = "#1e1e20"     # solid popover/window material
+    popup_bg = "#2c2c2e"
+
+    root_bg = ("qlineargradient(x1:0 y1:0, x2:0 y2:1, "
+               "stop:0 #26262b, stop:1 #161618)")
+    header_bg = "rgba(255,255,255,0.05)"
+
+    btn_bg = "rgba(255,255,255,0.09)"
+    btn_hover = "rgba(255,255,255,0.14)"
+    btn_press = "rgba(255,255,255,0.20)"
+    btn_disabled_bg = "rgba(255,255,255,0.04)"
+    primary_disabled_bg = "rgba(10,132,255,0.35)"
+    primary_disabled_fg = "rgba(255,255,255,0.50)"
+
+    accent_soft = "rgba(10,132,255,0.22)"
+    accent_glow = "rgba(10,132,255,0.13)"
+    accent_wash = "rgba(10,132,255,0.10)"
+
+    log_bg = "rgba(0,0,0,0.28)"
+
+    r_card = "16px"
+    r_btn = "12px"
+    r_input = "11px"
+    r_list = "13px"
+
+
+def stylesheet(p: type[Palette] = Palette) -> str:
     return f"""
     * {{
-        font-family: "SF Pro Display", "Segoe UI", "Inter", system-ui, sans-serif;
+        font-family: {p.font_stack};
         font-size: 13px;
         color: {p.text};
         outline: none;
     }}
 
-    QWidget#Root {{ background: {p.bg}; }}
+    QWidget#Root {{ background: {p.root_bg}; }}
 
     /* ---- Dialogs / message boxes ----
        Fusion gives top-level dialogs a near-white window background, which
        collides with the light default text color above and makes labels
        unreadable. Force the dark surface on every dialog so QLabel text,
        input dialogs, confirmations and the About box all read correctly. */
-    QDialog {{ background: {p.bg}; color: {p.text}; }}
-    QMessageBox {{ background: {p.surface}; color: {p.text}; }}
+    QDialog {{ background: {p.dialog_bg}; color: {p.text}; }}
+    QMessageBox {{ background: {p.dialog_bg}; color: {p.text}; }}
     QMessageBox QLabel {{ color: {p.text}; }}
     QInputDialog QLabel {{ color: {p.text}; }}
 
     /* ---- Header ---- */
     QFrame#Header {{
-        background: qlineargradient(x1:0 y1:0, x2:1 y2:0,
-            stop:0 #14172180, stop:1 #14172100);
+        background: {p.header_bg};
         border-bottom: 1px solid {p.border};
     }}
     QLabel#Title {{ font-size: 20px; font-weight: 700; color: {p.text}; }}
@@ -77,7 +165,7 @@ def stylesheet() -> str:
     QFrame#Card, QFrame#Panel {{
         background: {p.surface};
         border: 1px solid {p.border};
-        border-radius: 14px;
+        border-radius: {p.r_card};
     }}
     QLabel#SectionTitle {{
         font-size: 12px; font-weight: 700; color: {p.text_dim};
@@ -86,16 +174,16 @@ def stylesheet() -> str:
 
     /* ---- Buttons ---- */
     QPushButton {{
-        background: {p.surface_alt};
+        background: {p.btn_bg};
         border: 1px solid {p.border};
-        border-radius: 10px;
+        border-radius: {p.r_btn};
         padding: 8px 14px;
         color: {p.text};
         font-weight: 600;
     }}
-    QPushButton:hover {{ border-color: {p.border_focus}; background: #232838; }}
-    QPushButton:pressed {{ background: #2b3142; }}
-    QPushButton:disabled {{ color: {p.text_faint}; background: #141722; border-color: {p.border}; }}
+    QPushButton:hover {{ border-color: {p.border_focus}; background: {p.btn_hover}; }}
+    QPushButton:pressed {{ background: {p.btn_press}; }}
+    QPushButton:disabled {{ color: {p.text_faint}; background: {p.btn_disabled_bg}; border-color: {p.border}; }}
 
     QPushButton#Primary {{
         background: {p.accent}; border: none; color: white;
@@ -103,7 +191,7 @@ def stylesheet() -> str:
     }}
     QPushButton#Primary:hover {{ background: {p.accent_hover}; }}
     QPushButton#Primary:pressed {{ background: {p.accent_press}; }}
-    QPushButton#Primary:disabled {{ background: #353a52; color: #8a8fb0; }}
+    QPushButton#Primary:disabled {{ background: {p.primary_disabled_bg}; color: {p.primary_disabled_fg}; }}
 
     QPushButton#Danger {{ background: transparent; border: 1px solid {p.danger}; color: {p.danger}; }}
     QPushButton#Danger:hover {{ background: rgba(239,68,68,0.12); }}
@@ -115,7 +203,7 @@ def stylesheet() -> str:
     QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QTextEdit {{
         background: {p.surface_alt};
         border: 1px solid {p.border};
-        border-radius: 9px;
+        border-radius: {p.r_input};
         padding: 7px 10px;
         color: {p.text};
         selection-background-color: {p.accent};
@@ -124,7 +212,7 @@ def stylesheet() -> str:
     QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {p.border_focus}; }}
     QComboBox::drop-down {{ border: none; width: 22px; }}
     QComboBox QAbstractItemView {{
-        background: {p.surface_alt};
+        background: {p.popup_bg};
         border: 1px solid {p.border};
         border-radius: 8px;
         selection-background-color: {p.accent};
@@ -156,16 +244,16 @@ def stylesheet() -> str:
     QTableWidget, QTableView {{
         background: {p.surface};
         border: 1px solid {p.border};
-        border-radius: 14px;
+        border-radius: {p.r_card};
         gridline-color: transparent;
         alternate-background-color: {p.surface_alt};
-        selection-background-color: rgba(99,102,241,0.18);
+        selection-background-color: {p.accent_soft};
     }}
     QTableWidget::item, QTableView::item {{
         padding: 6px 8px; border-bottom: 1px solid {p.border};
     }}
     QTableWidget::item:hover, QTableView::item:hover {{
-        background: rgba(99,102,241,0.10);
+        background: {p.accent_glow};
     }}
     QStackedWidget {{ background: transparent; }}
 
@@ -173,7 +261,7 @@ def stylesheet() -> str:
     QListWidget, QListView {{
         background: {p.surface};
         border: 1px solid {p.border};
-        border-radius: 12px;
+        border-radius: {p.r_list};
         alternate-background-color: {p.surface_alt};
         selection-background-color: {p.accent};
         selection-color: white;
@@ -183,7 +271,7 @@ def stylesheet() -> str:
         padding: 7px 10px; border-radius: 8px; color: {p.text};
     }}
     QListWidget::item:hover, QListView::item:hover {{
-        background: rgba(99,102,241,0.10);
+        background: {p.accent_glow};
     }}
     QListWidget::item:selected, QListView::item:selected {{
         background: {p.accent}; color: white;
@@ -193,7 +281,7 @@ def stylesheet() -> str:
     /* ---- Tabs ---- */
     QTabWidget::pane {{
         border: 1px solid {p.border};
-        border-radius: 12px;
+        border-radius: {p.r_list};
         top: -1px;
         background: {p.surface};
     }}
@@ -216,15 +304,15 @@ def stylesheet() -> str:
     QTabBar::tab:hover:!selected {{ color: {p.text}; }}
 
     /* ---- Primary navigation (top tabs): clean underline style ---- */
-    QTabWidget#MainTabs {{ background: {p.bg}; }}
+    QTabWidget#MainTabs {{ background: {p.root_bg}; }}
     QTabWidget#MainTabs::pane {{
         border: none;
         border-top: 1px solid {p.border};
         border-radius: 0;
         top: 0;
-        background: {p.bg};
+        background: transparent;
     }}
-    QTabWidget#MainTabs > QTabBar {{ background: {p.bg}; }}
+    QTabWidget#MainTabs > QTabBar {{ background: transparent; }}
     QTabWidget#MainTabs > QTabBar::tab {{
         background: transparent;
         color: {p.text_dim};
@@ -252,7 +340,7 @@ def stylesheet() -> str:
     QLabel#Cover {{
         background: {p.surface_alt};
         border: 1px solid {p.border};
-        border-radius: 12px;
+        border-radius: {p.r_list};
         color: {p.text_faint};
     }}
     QStatusBar#AppStatus {{
@@ -269,7 +357,7 @@ def stylesheet() -> str:
     }}
     QFrame#DropZone[active="true"] {{
         border: 2px dashed {p.accent};
-        background: rgba(99,102,241,0.08);
+        background: {p.accent_wash};
     }}
     QLabel#DropIcon {{ font-size: 46px; color: {p.accent}; }}
     QLabel#DropHead {{ font-size: 17px; font-weight: 700; color: {p.text}; }}
@@ -304,10 +392,10 @@ def stylesheet() -> str:
 
     /* ---- Log ---- */
     QPlainTextEdit#Log {{
-        background: #0b0d13;
+        background: {p.log_bg};
         border: 1px solid {p.border};
-        border-radius: 12px;
-        font-family: "Menlo", "SF Mono", "JetBrains Mono", monospace;
+        border-radius: {p.r_list};
+        font-family: {p.mono_stack};
         font-size: 12px;
         color: {p.text_dim};
         padding: 8px;
@@ -321,7 +409,7 @@ def stylesheet() -> str:
     QScrollBar::handle:horizontal {{ background: {p.border}; border-radius: 5px; min-width: 30px; }}
 
     QToolTip {{
-        background: {p.surface_alt}; color: {p.text};
+        background: {p.popup_bg}; color: {p.text};
         border: 1px solid {p.border}; border-radius: 6px; padding: 5px 8px;
     }}
 
@@ -341,7 +429,7 @@ def stylesheet() -> str:
     QMenuBar::item:selected {{ background: {p.surface_alt}; color: {p.text}; }}
     QMenuBar::item:pressed {{ background: {p.accent}; color: white; }}
     QMenu {{
-        background: {p.surface_alt};
+        background: {p.popup_bg};
         color: {p.text};
         border: 1px solid {p.border};
         border-radius: 8px;
