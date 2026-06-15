@@ -305,6 +305,11 @@ class RemoteInstaller(QThread):
     progress = Signal(int, str, int)   # row index, time-remaining text, percent
     finished_all = Signal()
 
+    # Pause between packages so the console can finish committing the previous
+    # install before we queue the next one. Firing installs back-to-back is what
+    # makes the PS4's Remote PKG Installer crash; one-at-a-time avoids it.
+    _SETTLE_SECONDS = 4
+
     def __init__(self, server_ip: str, paths: list[str], ps4_ip: str,
                  server_port: int, served_root: str,
                  method: str = METHOD_PS4_RPI, parent=None) -> None:
@@ -315,6 +320,11 @@ class RemoteInstaller(QThread):
         self.server_port = int(server_port)
         self.served_root = served_root
         self.method = method
+        self._cancel = False
+
+    def cancel(self) -> None:
+        """Ask the install loop to stop after the current step."""
+        self._cancel = True
 
     def _url_for(self, pkg_path: str) -> str:
         """URL the console downloads from.
@@ -332,8 +342,13 @@ class RemoteInstaller(QThread):
     # ------------------------------------------------------------------ run
     def run(self) -> None:
         label = dict(INSTALL_METHODS).get(self.method, self.method)
-        self.log.emit(f"Starting remote install via {label}…")
+        total = len(self.paths)
+        self.log.emit(f"Starting remote install via {label} — {total} package(s), "
+                      "one at a time…")
         for index, pkg_path in enumerate(self.paths):
+            if self._cancel:
+                self.log.emit("Install cancelled.")
+                break
             name = os.path.basename(pkg_path)
             url = self._url_for(pkg_path)
             try:
@@ -346,6 +361,9 @@ class RemoteInstaller(QThread):
             except (urllib.error.URLError, OSError, ValueError) as e:
                 self.log.emit(f"✗ {name}: {e}")
                 self.progress.emit(index, "Failed", 0)
+            # let the console settle before queuing the next package
+            if index + 1 < total:
+                time.sleep(self._SETTLE_SECONDS)
         self.log.emit("All packages processed.")
         self.finished_all.emit()
 
@@ -440,6 +458,9 @@ class RemoteInstaller(QThread):
             return
         self.log.emit(f"Installing {resp.get('title') or name}")
         while True:
+            if self._cancel:
+                self.log.emit(f"… {name}: install cancelled (continues on the PS4)")
+                break
             try:
                 st = self._post("get_task_progress", {"task_id": task_id})
             except (urllib.error.URLError, OSError) as e:

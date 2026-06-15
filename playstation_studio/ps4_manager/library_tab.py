@@ -104,9 +104,11 @@ class Ps4LibraryTab(QWidget):
         self._scan: ScanWorker | None = None
         self._scanning = False
         self.scanned_root = ""
+        self._installer: RemoteInstaller | None = None
         self._install_bars: dict[int, QProgressBar] = {}
         self._dl_rows: dict[str, int] = {}      # served rel-path -> install row
         self._dl_start: dict[int, float] = {}   # row -> download start time
+        self._install_rows: list[int] = []      # installer index -> model row
         self._syncing = False        # guard while mirroring related checks
 
         body = QHBoxLayout(self)
@@ -211,6 +213,7 @@ class Ps4LibraryTab(QWidget):
         self.install_view = QTableView()
         self.install_view.setModel(self.install_model)
         self.install_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.install_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.install_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.install_view.verticalHeader().setVisible(False)
         self.install_view.setColumnHidden(6, True)
@@ -219,14 +222,21 @@ class Ps4LibraryTab(QWidget):
         lay.addWidget(self.install_view)
 
         row = QHBoxLayout()
+        self.btn_remove_sel = QPushButton("Remove Selected")
+        self.btn_remove_sel.setObjectName("Ghost")
+        self.btn_remove_sel.clicked.connect(self.on_remove_selected)
+        self.btn_clear = QPushButton("Clear")
+        self.btn_clear.setObjectName("Ghost")
+        self.btn_clear.clicked.connect(self._clear_install)
+        self.btn_install_sel = QPushButton("▶  Install Selected")
+        self.btn_install_sel.clicked.connect(self.on_install_selected)
         self.btn_install = QPushButton("▶  Install All")
         self.btn_install.setObjectName("Primary")
         self.btn_install.clicked.connect(self.on_install_all)
-        btn_clear = QPushButton("Clear")
-        btn_clear.setObjectName("Ghost")
-        btn_clear.clicked.connect(self._clear_install)
+        row.addWidget(self.btn_remove_sel)
+        row.addWidget(self.btn_clear)
         row.addStretch(1)
-        row.addWidget(btn_clear)
+        row.addWidget(self.btn_install_sel)
         row.addWidget(self.btn_install)
         lay.addLayout(row)
         return w
@@ -619,9 +629,69 @@ class Ps4LibraryTab(QWidget):
             self.btn_exploit.setText("Start Exploit Host")
             self._log("Exploit host stopped.")
 
+    def _selected_install_rows(self) -> list[int]:
+        return sorted({i.row() for i in
+                       self.install_view.selectionModel().selectedRows()})
+
     def on_install_all(self) -> None:
-        rows = self.install_model.rowCount()
-        if rows == 0:
+        self._start_install(list(range(self.install_model.rowCount())))
+
+    def on_install_selected(self) -> None:
+        rows = self._selected_install_rows()
+        if not rows:
+            QMessageBox.information(
+                self, "Nothing selected",
+                "Select one or more rows in the Install list first.")
+            return
+        self._start_install(rows)
+
+    def on_remove_selected(self) -> None:
+        rows = self._selected_install_rows()
+        if not rows:
+            return
+        # untick the matching source packages, then drop the rows bottom-up
+        for r in rows:
+            item = self.install_model.item(r, 6)
+            if item is None:
+                continue
+            info = self.infos.get(os.path.normpath(item.text()))
+            if info is not None:
+                self._uncheck_source(info)
+        for r in reversed(rows):
+            self.install_model.removeRow(r)
+        self._refresh_counts()
+
+    def _uncheck_source(self, info: PkgInfo) -> None:
+        """Untick a single package's checkbox in its category list."""
+        model = self.models.get(info.category_label)
+        if model is None:
+            return
+        np = os.path.normpath(info.path)
+        self._syncing = True
+        try:
+            for r in range(model.rowCount()):
+                if model.item(r, PATH_COL).text() == np:
+                    cell = model.item(r, 0)
+                    if cell.checkState() != Qt.Unchecked:
+                        cell.setCheckState(Qt.Unchecked)
+                    break
+        finally:
+            self._syncing = False
+
+    def _set_install_buttons(self, enabled: bool) -> None:
+        for b in (self.btn_install, self.btn_install_sel,
+                  self.btn_remove_sel, self.btn_clear):
+            b.setEnabled(enabled)
+
+    def _start_install(self, rows: list[int]) -> None:
+        if self._installer is not None and self._installer.isRunning():
+            QMessageBox.information(
+                self, "Install in progress",
+                "Packages install one at a time — wait for the current run "
+                "to finish.")
+            return
+        rows = [r for r in rows if 0 <= r < self.install_model.rowCount()]
+        if not rows:
             QMessageBox.information(self, "Nothing queued",
                                     "Tick packages in the Games/Updates/DLC tabs.")
             return
@@ -629,7 +699,7 @@ class Ps4LibraryTab(QWidget):
             QMessageBox.information(self, "Console IP",
                                     "Enter your console's IP address.")
             return
-        paths = [self.install_model.item(r, 6).text() for r in range(rows)]
+        paths = [self.install_model.item(r, 6).text() for r in rows]
         # start serving the scanned folder
         if self._server is None:
             self._server = FolderHttpServer(
@@ -644,16 +714,18 @@ class Ps4LibraryTab(QWidget):
             self._server_wired = True
         self._server.reset_counters()
 
-        # map each pkg's served URL path → its install row, so the HTTP server's
-        # byte counter can drive that row's progress bar (PS5 downloads from us).
+        # map served URL path → real model row, and the installer's 0-based
+        # index → real model row (so installing a subset updates the right rows).
         self._install_bars.clear()
         self._dl_rows.clear()
         self._dl_start.clear()
-        for r in range(rows):
-            rel = os.path.relpath(paths[r], self.scanned_root).replace(os.sep, "/")
+        self._install_rows = list(rows)
+        for r, p in zip(rows, paths):
+            rel = os.path.relpath(p, self.scanned_root).replace(os.sep, "/")
             self._dl_rows["/" + rel] = r
+            self.install_model.setItem(r, 4, QStandardItem("Queued"))
 
-        self.btn_install.setEnabled(False)
+        self._set_install_buttons(False)
         self._installer = RemoteInstaller(
             self.server_ip.currentText(), paths, self.ps4_ip.text().strip(),
             self.port.value(), self.scanned_root,
@@ -661,7 +733,7 @@ class Ps4LibraryTab(QWidget):
         self._installer.log.connect(self._log)
         self._installer.progress.connect(self._on_install_progress)
         self._installer.finished_all.connect(
-            lambda: self.btn_install.setEnabled(True))
+            lambda: self._set_install_buttons(True))
         self._installer.start()
 
     def _row_bar(self, row: int) -> QProgressBar:
@@ -695,10 +767,11 @@ class Ps4LibraryTab(QWidget):
         self._log(f"✓ PS5 finished downloading: {os.path.basename(rel)}")
 
     def _on_install_progress(self, index: int, eta: str, pct: int) -> None:
-        if index >= self.install_model.rowCount():
+        row = self._install_rows[index] if index < len(self._install_rows) else index
+        if row >= self.install_model.rowCount():
             return
-        self.install_model.setItem(index, 4, QStandardItem(eta))
-        self._row_bar(index).setValue(pct)
+        self.install_model.setItem(row, 4, QStandardItem(eta))
+        self._row_bar(row).setValue(pct)
 
     # ---------------------------------------------------------------- misc
     def _log(self, text: str) -> None:
@@ -708,6 +781,9 @@ class Ps4LibraryTab(QWidget):
         if self._scan is not None and self._scan.isRunning():
             self._scan.cancel()
             self._scan.wait(2000)
+        if self._installer is not None and self._installer.isRunning():
+            self._installer.cancel()
+            self._installer.wait(6000)
         for thread in (self._server, self._exploit):
             if thread is not None:
                 thread.stop()
