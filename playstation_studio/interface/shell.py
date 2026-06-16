@@ -102,7 +102,7 @@ class MainWindow(QMainWindow):
         help_menu = bar.addMenu("&Help")
         act_docs = QAction("Documentation", self)
         act_docs.setShortcut(QKeySequence.HelpContents)
-        act_docs.triggered.connect(self._open_docs)
+        act_docs.triggered.connect(self._show_docs)
         help_menu.addAction(act_docs)
         act_update = QAction("Check for Updates…", self)
         act_update.setMenuRole(QAction.NoRole)   # keep it in Help on all platforms
@@ -117,38 +117,107 @@ class MainWindow(QMainWindow):
         os.makedirs(CONFIG_DIR, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(CONFIG_DIR)))
 
-    def _open_docs(self) -> None:
-        target = _README if os.path.isfile(_README) else _PROJECT_ROOT
-        QDesktopServices.openUrl(QUrl.fromLocalFile(target))
+    def _show_docs(self) -> None:
+        """Render README.md as HTML in an in-app viewer (not raw text)."""
+        from PySide6.QtWidgets import (
+            QDialog, QHBoxLayout, QPushButton, QTextBrowser, QVBoxLayout)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("PlayStation Studio — Documentation")
+        dlg.resize(900, 680)
+        lay = QVBoxLayout(dlg)
+
+        view = QTextBrowser(dlg)
+        view.setOpenExternalLinks(True)
+        view.setSearchPaths([_PROJECT_ROOT])    # resolve relative images/links
+        if os.path.isfile(_README):
+            try:
+                with open(_README, encoding="utf-8") as f:
+                    view.setMarkdown(f.read())
+            except OSError as e:
+                view.setMarkdown(f"# Documentation\n\nCouldn't read README.md: {e}")
+        else:
+            view.setHtml(
+                "<h2>Documentation</h2><p>Full docs on the project page: "
+                "<a href='https://github.com/dirazi83/PSS'>"
+                "github.com/dirazi83/PSS</a></p>")
+        lay.addWidget(view, 1)
+
+        row = QHBoxLayout()
+        btn_web = QPushButton("Open on GitHub")
+        btn_web.setObjectName("Ghost")
+        btn_web.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl("https://github.com/dirazi83/PSS#readme")))
+        btn_close = QPushButton("Close")
+        btn_close.setObjectName("Primary")
+        btn_close.clicked.connect(dlg.accept)
+        row.addWidget(btn_web)
+        row.addStretch(1)
+        row.addWidget(btn_close)
+        lay.addLayout(row)
+        dlg.exec()
 
     def _show_about(self) -> None:
+        """A rich HTML About panel with the app icon (not a plain text box)."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import (
+            QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout)
         from ..ps5_compressor.jobs import mkpfs_version
         engine = mkpfs_version()
         engine_txt = f"MkPFS {engine}" if engine else "MkPFS"
-        QMessageBox.about(
-            self, "About PlayStation Studio",
-            f"<h3>PlayStation Studio</h3>"
-            f"<p>Version {APP_VERSION}</p>"
-            "<p>An all-in-one toolkit:</p>"
-            "<ul>"
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About PlayStation Studio")
+        dlg.setMinimumWidth(500)
+        outer = QVBoxLayout(dlg)
+
+        top = QHBoxLayout()
+        icon = QLabel()
+        icon.setPixmap(app_icon().pixmap(88, 88))
+        icon.setAlignment(Qt.AlignTop)
+        top.addWidget(icon)
+        head = QLabel()
+        head.setTextFormat(Qt.RichText)
+        head.setOpenExternalLinks(True)
+        head.setWordWrap(True)
+        head.setText(
+            "<h3 style='margin:0'>PlayStation Studio</h3>"
+            f"<p style='margin:2px 0 10px 0; color:#9aa0b4'>Version {APP_VERSION}"
+            "</p>"
+            "<p>An all-in-one PS4/PS5 homebrew toolkit:</p>"
+            "<ul style='margin-left:-20px'>"
             "<li><b>PKG Manager</b> — browse, rename, export, remote-install</li>"
             "<li><b>PS5 PFS Compressor</b> — batch game-dump compression</li>"
             "<li><b>Payload Sender</b> — send ELF/BIN/JAR over TCP</li>"
             "<li><b>FTP Client</b> — dual-pane transfers</li>"
-            "</ul>"
-            "<p style='color:#9aa0b4'>Built with Python &amp; PySide6.</p>"
-            "<hr><p><b>Credits</b></p>"
-            "<ul>"
+            "</ul>")
+        top.addWidget(head, 1)
+        outer.addLayout(top)
+
+        credits = QLabel()
+        credits.setTextFormat(Qt.RichText)
+        credits.setOpenExternalLinks(True)
+        credits.setWordWrap(True)
+        credits.setText(
+            "<hr><p><b>Credits</b></p><ul style='margin-left:-20px'>"
             f"<li>PS5 compression engine: <b>{engine_txt}</b> by PSBrew — "
-            "<a href='https://github.com/PSBrew/MkPFS'>github.com/PSBrew/MkPFS</a></li>"
-            "<li>Inspired by <b>PS5-FFPFSC-PRO</b> by KINGDKAK — "
-            "<a href='https://github.com/KINGDKAK/PS5-FFPFSC-PRO'>"
-            "github.com/KINGDKAK/PS5-FFPFSC-PRO</a></li>"
+            "<a href='https://github.com/PSBrew/MkPFS'>github.com/PSBrew/MkPFS</a>"
+            "</li>"
+            "<li>Inspired by <b>PS5-FFPFSC-PRO</b> by KINGDKAK</li>"
             "<li>PS5 install: <b>etaHEN</b> DPI · PS4 install: "
             "<b>Remote PKG Installer</b> by flatz — "
             "<a href='https://github.com/flatz/ps4_remote_pkg_installer'>"
             "github.com/flatz/ps4_remote_pkg_installer</a></li>"
-            "</ul>")
+            "</ul><p style='color:#6b7185'>Built with Python &amp; PySide6.</p>")
+        outer.addWidget(credits)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        btn = QPushButton("OK")
+        btn.setObjectName("Primary")
+        btn.clicked.connect(dlg.accept)
+        row.addWidget(btn)
+        outer.addLayout(row)
+        dlg.exec()
 
     # =============================================================== updates
     def _check_updates(self) -> None:

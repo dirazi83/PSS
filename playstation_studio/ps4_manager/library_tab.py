@@ -728,6 +728,18 @@ class Ps4LibraryTab(QWidget):
         self._installer.progress.connect(self._on_install_progress)
         self._installer.finished_all.connect(self._on_install_done)
 
+        # If a server is already running but for a different folder (the user
+        # re-scanned) or a different port, retire it so the *new* folder is the
+        # one served — otherwise the alias resolves against the old directory
+        # and every package 404s.
+        if self._server is not None and (
+                self._server.directory != self.scanned_root
+                or self._server.port != self.port.value()):
+            self._server.stop()
+            self._server.wait(1500)
+            self._server = None
+            self._server_wired = False
+
         if self._server is None:
             self._server = FolderHttpServer(
                 self.scanned_root, self.port.value(), self)
