@@ -18,7 +18,7 @@ from ..ps5_compressor.compressor_tab import Ps5CompressTab
 from ..shared.assets import app_icon, make_icon
 from ..shared.config import CONFIG_DIR
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _README = os.path.join(_PROJECT_ROOT, "README.md")
 

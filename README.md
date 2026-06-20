@@ -6,7 +6,7 @@
 
 ### All-in-one toolkit for PS4 / PS5 homebrew — FTP client, payload sender, PKG manager & PFS compressor
 
-**Version 1.0.3**  ·  Powered by [MkPFS 0.0.8](https://github.com/PSBrew/MkPFS)
+**Version 1.0.4**  ·  Powered by [MkPFS 0.0.8](https://github.com/PSBrew/MkPFS)
 
 A modern, cross-platform desktop application built with Python and PySide6. PlayStation
 Studio brings a dual-pane FTP client, a network payload sender, a PKG library
@@ -507,6 +507,17 @@ For source runs, confirm Python 3.8+ and that `pip install -r requirements.txt` 
 ---
 
 ## 17. Changelog
+
+### v1.0.4
+
+- **Re-scan now re-maps the package server.** Scanning a different PKG folder and
+  installing used to keep serving the *first* folder (every package 404'd with
+  _"Unable to set up prerequisites"_). The HTTP server now retires and rebinds to
+  whichever folder you last scanned.
+- **Documentation & About render as HTML.** Help → Documentation opens an in-app
+  viewer that renders the README (headings, links, screenshots) instead of
+  launching a text editor on raw markdown; About is now a rich panel with the app
+  icon and clickable credit links.
 
 ### v1.0.3
 
