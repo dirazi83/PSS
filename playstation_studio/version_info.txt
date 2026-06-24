@@ -7,8 +7,8 @@
 # EXE(version=...). Windows-only; ignored on macOS/Linux.
 VSVersionInfo(
     ffi=FixedFileInfo(
-        filevers=(1, 0, 4, 0),
-        prodvers=(1, 0, 4, 0),
+        filevers=(1, 0, 5, 0),
+        prodvers=(1, 0, 5, 0),
         mask=0x3F,
         flags=0x0,
         OS=0x40004,
@@ -27,7 +27,7 @@ VSVersionInfo(
                             "FileDescription",
                             "PlayStation Studio - PS4/PS5 homebrew toolkit",
                         ),
-                        StringStruct("FileVersion", "1.0.4.0"),
+                        StringStruct("FileVersion", "1.0.5.0"),
                         StringStruct("InternalName", "PlayStation Studio"),
                         StringStruct(
                             "LegalCopyright",
@@ -35,7 +35,7 @@ VSVersionInfo(
                         ),
                         StringStruct("OriginalFilename", "PlayStation Studio.exe"),
                         StringStruct("ProductName", "PlayStation Studio"),
-                        StringStruct("ProductVersion", "1.0.4.0"),
+                        StringStruct("ProductVersion", "1.0.5.0"),
                     ],
                 )
             ]
