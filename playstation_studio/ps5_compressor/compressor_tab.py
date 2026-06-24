@@ -131,6 +131,10 @@ class Ps5CompressTab(QWidget):
         self.btn_estimate = QPushButton("⊜  Estimate")
         self.btn_estimate.setToolTip("Predict the packed size and padding before "
                                      "compressing (recommends auto block size).")
+        self.btn_extract_img = QPushButton("⊟  Extract…")
+        self.btn_extract_img.setToolTip("Unpack a .ffpfs / .ffpfsc image back to "
+                                        "a folder.")
+        self.btn_extract_img.clicked.connect(self.on_extract_image)
         self.btn_history = QPushButton("History")
         self.btn_history.setObjectName("Ghost")
         self.btn_clear = QPushButton("Clear")
@@ -158,6 +162,7 @@ class Ps5CompressTab(QWidget):
         bar.addWidget(self.btn_add)
         bar.addWidget(self.btn_remove)
         bar.addWidget(self.btn_estimate)
+        bar.addWidget(self.btn_extract_img)
         bar.addStretch(1)
         self.stats_pill = QLabel("0 games")
         self.stats_pill.setObjectName("Pill")
@@ -268,11 +273,17 @@ class Ps5CompressTab(QWidget):
         badge_row.addStretch(1)
         lay.addLayout(badge_row)
 
-        # compress + level
-        self.cb_compress = QCheckBox("PFSC compression")
-        self.cb_compress.setChecked(True)
-        self.cb_compress.toggled.connect(self._on_compress_toggle)
-        lay.addWidget(self.cb_compress)
+        # output format: compressed (.ffpfsc) vs uncompressed (.ffpfs)
+        lay.addWidget(self._field_label("Output format"))
+        self.fmt = QComboBox()
+        self.fmt.addItem("Compressed PFS  ·  .ffpfsc", True)
+        self.fmt.addItem("Uncompressed PFS  ·  .ffpfs", False)
+        self.fmt.setToolTip(
+            "Compressed (.ffpfsc) — smaller on disk; decompressed on the "
+            "console.\nUncompressed (.ffpfs) — larger, full read speed.\n"
+            "Both mount under ShadowMountPlus / MicroMount.")
+        self.fmt.currentIndexChanged.connect(self._on_format_changed)
+        lay.addWidget(self.fmt)
 
         self.lbl_level = QLabel("Compression level: 9")
         self.lbl_level.setStyleSheet(f"color:{Palette.text_dim}; font-size:12px;")
@@ -606,8 +617,8 @@ class Ps5CompressTab(QWidget):
         self.btn_scan.style().polish(self.btn_scan)
         # block the actions that mutate the list / start a pack while scanning
         for w in (self.btn_add, self.btn_remove, self.btn_estimate,
-                  self.btn_history, self.btn_clear, self.btn_start,
-                  self.btn_start_sel):
+                  self.btn_extract_img, self.btn_history, self.btn_clear,
+                  self.btn_start, self.btn_start_sel):
             w.setEnabled(not scanning)
 
     def on_remove_selected(self) -> None:
@@ -694,6 +705,11 @@ class Ps5CompressTab(QWidget):
     def on_history(self) -> None:
         history.HistoryDialog(self).exec()
 
+    def on_extract_image(self) -> None:
+        """Open the PFS Extract dialog (unpack .ffpfs / .ffpfsc → folder)."""
+        from .extract_dialog import ExtractDialog
+        ExtractDialog(self).exec()
+
     def on_pick_output(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Choose output folder")
         if d:
@@ -726,7 +742,7 @@ class Ps5CompressTab(QWidget):
         return PackSettings(
             output_dir=self.out_dir.text().strip(),
             version="PS5",
-            compress=self.cb_compress.isChecked(),
+            compress=bool(self.fmt.currentData()),
             compression_level=self.level.value(),
             verify=self.cb_verify.isChecked(),
             encrypted=self.cb_encrypt.isChecked(),
@@ -874,7 +890,7 @@ class Ps5CompressTab(QWidget):
         self.btn_start_sel.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         for w in (self.btn_scan, self.btn_add, self.btn_remove, self.btn_clear,
-                  self.btn_estimate):
+                  self.btn_estimate, self.btn_extract_img):
             w.setEnabled(not running)
 
     # ----------------------------------------------------- runner signals
@@ -1036,7 +1052,9 @@ class Ps5CompressTab(QWidget):
         self.log.insertPlainText(text)
         self.log.moveCursor(QTextCursor.End)
 
-    def _on_compress_toggle(self, on: bool) -> None:
+    def _on_format_changed(self, _idx: int = 0) -> None:
+        # the compression level only applies to the compressed (.ffpfsc) format
+        on = bool(self.fmt.currentData())
         self.level.setEnabled(on)
         self.lbl_level.setEnabled(on)
 
