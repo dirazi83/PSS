@@ -13,7 +13,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListView, QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QSlider, QSpinBox,
+    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSlider, QSpinBox,
     QStackedWidget, QSystemTrayIcon, QTableWidget, QTableWidgetItem, QTreeView,
     QVBoxLayout, QWidget,
 )
@@ -236,19 +236,19 @@ class Ps5CompressTab(QWidget):
         return zone
 
     # ======================================================= settings panel
-    def _build_settings_panel(self) -> QFrame:
+    def _build_settings_panel(self) -> QWidget:
+        """Pack settings, grouped into Output / Performance / Advanced and held
+        in a scroll area so a short window scrolls instead of squashing the
+        inputs (squashed inputs clip their text)."""
         panel = QFrame()
         panel.setObjectName("Panel")
-        panel.setFixedWidth(320)
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(18, 18, 18, 18)
-        lay.setSpacing(14)
+        lay.setSpacing(10)
 
-        title = QLabel("PACK SETTINGS")
-        title.setObjectName("SectionTitle")
-        lay.addWidget(title)
+        # ----------------------------------------------------------- OUTPUT
+        lay.addWidget(self._subhead("OUTPUT", first=True))
 
-        # output dir
         lay.addWidget(self._field_label("Output folder"))
         out_row = QHBoxLayout()
         out_row.setSpacing(6)
@@ -263,7 +263,6 @@ class Ps5CompressTab(QWidget):
         out_row.addWidget(btn_browse)
         lay.addLayout(out_row)
 
-        # version — PS5 only
         lay.addWidget(self._field_label("Console profile"))
         version_badge = QLabel("PS5")
         version_badge.setObjectName("VersionBadge")
@@ -295,14 +294,15 @@ class Ps5CompressTab(QWidget):
             lambda v: self.lbl_level.setText(f"Compression level: {v}"))
         lay.addWidget(self.level)
 
-        # cpu
+        # ------------------------------------------------------ PERFORMANCE
+        lay.addWidget(self._subhead("PERFORMANCE"))
+
         lay.addWidget(self._field_label("CPU cores (0 = auto)"))
         self.cpu = QSpinBox()
         self.cpu.setRange(0, 256)
         self.cpu.setValue(0)
         lay.addWidget(self.cpu)
 
-        # temp folder policy
         lay.addWidget(self._field_label("Temp files (intermediate data)"))
         self.temp_mode = QComboBox()
         self.temp_mode.addItem("App folder (default)", TEMP_MODE_APP)
@@ -331,7 +331,17 @@ class Ps5CompressTab(QWidget):
         lay.addLayout(temp_row)
         self._sync_temp_row()
 
-        # toggles
+        self.cb_lowmem = QCheckBox("Low-memory mode (1 core, slower)")
+        self.cb_lowmem.setToolTip("Compress one file at a time to minimise peak "
+                                  "RAM. Use on machines with little free memory.")
+        self.cb_lowmem.setChecked(bool(config.get(CFG, "low_memory", False)))
+        self.cb_lowmem.toggled.connect(
+            lambda on: config.set(CFG, "low_memory", on))
+        lay.addWidget(self.cb_lowmem)
+
+        # --------------------------------------------------------- ADVANCED
+        lay.addWidget(self._subhead("ADVANCED"))
+
         # ShadowMountPlus compatibility: force a >= 32 KiB block so images mount
         # cleanly under ShadowMountPlus. Opt-in (off by default) because it makes
         # tiny-file games larger than the smallest auto-fit image.
@@ -360,16 +370,10 @@ class Ps5CompressTab(QWidget):
         self.cb_verify = QCheckBox("Verify after packing")
         self.cb_encrypt = QCheckBox("Encrypt blocks (AES-XTS)")
         self.cb_require = QCheckBox("Require game files")
-        self.cb_lowmem = QCheckBox("Low-memory mode (1 core, slower)")
-        self.cb_lowmem.setToolTip("Compress one file at a time to minimise peak "
-                                  "RAM. Use on machines with little free memory.")
-        self.cb_lowmem.setChecked(bool(config.get(CFG, "low_memory", False)))
-        self.cb_lowmem.toggled.connect(
-            lambda on: config.set(CFG, "low_memory", on))
         self.cb_overwrite = QCheckBox("Overwrite existing images")
         for cb in (self.cb_shadowmount, self.cb_autoblock, self.cb_skipexec,
                    self.cb_verify, self.cb_encrypt, self.cb_require,
-                   self.cb_lowmem, self.cb_overwrite):
+                   self.cb_overwrite):
             lay.addWidget(cb)
         # auto-fit is overridden while ShadowMountPlus mode is on
         self._on_shadowmount_toggle(self.cb_shadowmount.isChecked())
@@ -383,11 +387,28 @@ class Ps5CompressTab(QWidget):
         credit.setOpenExternalLinks(True)
         credit.setStyleSheet(f"color:{Palette.text_faint}; font-size:11px;")
         lay.addWidget(credit)
-        return panel
+
+        # Hold the card in a scroll area so a short window scrolls rather than
+        # vertically compressing the inputs (which clips their text).
+        scroll = QScrollArea()
+        scroll.setWidget(panel)
+        scroll.setWidgetResizable(True)
+        scroll.setFixedWidth(342)        # 320 content + room for the scrollbar
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.viewport().setStyleSheet("background: transparent;")
+        return scroll
 
     def _field_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
         lbl.setStyleSheet(f"color:{Palette.text_dim}; font-size:12px; font-weight:600;")
+        return lbl
+
+    def _subhead(self, text: str, first: bool = False) -> QLabel:
+        """A small uppercase section divider inside the settings panel."""
+        lbl = QLabel(text)
+        lbl.setObjectName("SectionTitle")
+        lbl.setStyleSheet("" if first else "margin-top:8px;")
         return lbl
 
     # =============================================================== footer
