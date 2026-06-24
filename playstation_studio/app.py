@@ -23,7 +23,10 @@ def main() -> int:
         # Modern macOS "Liquid Glass" theme + the real SF Pro system font.
         from PySide6.QtGui import QColor, QFontDatabase, QPalette
         sysfont = QFontDatabase.systemFont(QFontDatabase.GeneralFont)
-        sysfont.setPointSize(13)
+        # Match the stylesheet, which sizes text in PIXELS. Using point size
+        # here (≈17px on Retina) while the QSS paints 13px clips combo/input
+        # text inside boxes laid out for the smaller metric.
+        sysfont.setPixelSize(13)
         app.setFont(sysfont)
         # A dark base palette so the theme's translucent rgba() surfaces layer
         # over dark (the material look) instead of Fusion's default white base.

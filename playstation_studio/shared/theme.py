@@ -204,7 +204,8 @@ def stylesheet(p: type[Palette] = Palette) -> str:
         background: {p.surface_alt};
         border: 1px solid {p.border};
         border-radius: {p.r_input};
-        padding: 7px 10px;
+        padding: 6px 10px;
+        min-height: 18px;          /* guarantee room so text never clips */
         color: {p.text};
         selection-background-color: {p.accent};
     }}
