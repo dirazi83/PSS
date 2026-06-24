@@ -21,11 +21,15 @@ datas += collect_data_files("mkpfs")          # the PS5 engine's data files
 datas += collect_data_files("certifi")        # CA bundle for the in-app updater
 
 # --- imports PyInstaller can't see automatically ---------------------------
-hiddenimports = collect_submodules("mkpfs") + ["PySide6.QtSvg", "openpyxl", "certifi"]
-for optional in ("keyring",):                 # only if installed
+hiddenimports = collect_submodules("mkpfs") + [
+    "PySide6.QtSvg", "PySide6.QtSvgWidgets", "openpyxl", "certifi"]
+# Optional packages: collect submodules + bundled data (qss/fonts/svg) only when
+# installed, so the spec still works without them.
+for optional in ("keyring", "qfluentwidgets", "qframelesswindow", "darkdetect"):
     try:
         __import__(optional)
         hiddenimports += collect_submodules(optional)
+        datas += collect_data_files(optional)
     except Exception:
         pass
 

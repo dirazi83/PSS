@@ -1,23 +1,24 @@
-"""Application bootstrap: create the QApplication, apply the theme, show window."""
+"""Application bootstrap: create the QApplication, build the shell, show it.
+
+Prefers the Fluent left-navigation shell (PySide6-Fluent-Widgets). If that
+package isn't importable, falls back to the classic Fusion + custom-QSS tabbed
+shell so the app still runs.
+"""
 
 from __future__ import annotations
 
+import logging
 import sys
 
 from PySide6.QtWidgets import QApplication
 
-from .interface.shell import MainWindow
 from .shared.paths import ensure_app_dirs
 from .shared.theme import MacPalette, Palette, stylesheet
 
 
-def main() -> int:
-    # Create payloads/, host/ and temp/ working folders before anything else.
-    ensure_app_dirs()
-
-    app = QApplication(sys.argv)
-    app.setApplicationName("PlayStation Studio")
-    app.setApplicationDisplayName("PlayStation Studio")
+def _build_classic_shell(app: QApplication):
+    """The original Fusion + custom-QSS tabbed shell (fallback)."""
+    from .interface.shell import MainWindow
     app.setStyle("Fusion")
     if sys.platform == "darwin":
         # Modern macOS "Liquid Glass" theme + the real SF Pro system font.
@@ -49,8 +50,28 @@ def main() -> int:
         app.setStyleSheet(stylesheet(MacPalette))
     else:
         app.setStyleSheet(stylesheet(Palette))
+    return MainWindow()
 
-    win = MainWindow()
+
+def main() -> int:
+    # Create payloads/, host/ and temp/ working folders before anything else.
+    ensure_app_dirs()
+
+    app = QApplication(sys.argv)
+    app.setApplicationName("PlayStation Studio")
+    app.setApplicationDisplayName("PlayStation Studio")
+
+    # Prefer the Fluent left-navigation shell; the theme must be applied before
+    # the window is constructed (Fluent builds its chrome with the active theme).
+    try:
+        from .interface.fluent_shell import FluentMainWindow, init_fluent_theme
+        init_fluent_theme()
+        win = FluentMainWindow()
+    except Exception as e:        # qfluentwidgets missing or failed to init
+        logging.getLogger(__name__).info(
+            "Fluent shell unavailable (%s); using the classic shell", e)
+        win = _build_classic_shell(app)
+
     win.show()
     return app.exec()
 
